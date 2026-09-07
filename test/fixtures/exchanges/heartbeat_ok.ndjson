@@ -1,0 +1,2 @@
+{"v":1,"type":"accepted","id":42,"mono_us":123456789}
+{"v":1,"type":"result","id":42,"ok":true,"state":"STREAMING","config_rev":184,"payload":{"server_time_mono_us":123456789,"daemon_state":"STREAMING"}}

@@ -1,0 +1,181 @@
+{
+  "v": 1,
+  "type": "state",
+  "seq": 101,
+  "mono_us": 123456789,
+  "payload": {
+    "state": "STREAMING",
+    "profile": "full_wide_640x360",
+    "pending_profile": null,
+    "rotation": 0,
+    "config_rev": 184,
+    "last_known_good": "full_wide_640x360",
+    "last_error": "",
+    "worker_pid": 363,
+    "daemon_uptime_s": 3600.5,
+    "restarts": 1,
+    "features": {
+      "preset": "debug",
+      "uart_enabled": true,
+      "rtsp": true,
+      "recording": false,
+      "overlay": true,
+      "record_every_n": 1
+    },
+    "resources": {
+      "vb_active": true,
+      "vb_pool_count": 7,
+      "mipi_loaded": true,
+      "mipi_users": 1,
+      "temperature_c": 51.2,
+      "power_w": null,
+      "needs_reboot": false
+    },
+    "worker": {
+      "type": "state",
+      "timestamp_ms": 123456,
+      "frame_count": 9000,
+      "lifecycle": {
+        "state": "STREAMING",
+        "sensor_standby": false,
+        "reg0100": 9,
+        "standby_ms": 0,
+        "last_wake_ms": 34.5,
+        "standby_count": 1,
+        "standby_failures": 0,
+        "wake_count": 1,
+        "wake_failures": 0
+      },
+      "performance": {
+        "fps": 79.8,
+        "requested_fps": 80,
+        "process_ms": 0.52,
+        "detection_fps": 79.8,
+        "process_max_ms": 0.8,
+        "timeouts": 0,
+        "errors": 0
+      },
+      "target": {
+        "found": true,
+        "x": 180,
+        "y": 120,
+        "pixels": 87,
+        "area": 240,
+        "rect": [170, 110, 20, 24],
+        "brightness": 73.0,
+        "pitch_control": 0.01,
+        "yaw_control": -0.02
+      },
+      "vision": {
+        "detector_mode": "nv21_score",
+        "green_score": {
+          "y_min": 20,
+          "g_min": 50,
+          "score_min": 60,
+          "rg_min": 20,
+          "gb_min": 20,
+          "coarse_stride": 4,
+          "refine_radius": 12
+        },
+        "lab": [20, 60, -128, -20, 0, 60],
+        "edge_x": 0,
+        "edge_y": 0,
+        "detect_roi": [40, 40, 280, 160],
+        "search_radius": 20,
+        "area_threshold": 10,
+        "pixels_threshold": 10,
+        "x_stride": 1,
+        "y_stride": 1,
+        "detect_every_n": 1,
+        "detection_frames": 8990,
+        "jobs_dropped": 0,
+        "detection_age_frames": 0,
+        "profile_us": {
+          "coarse": 30,
+          "threshold": 180,
+          "blob": 280,
+          "coarse_samples": 3150,
+          "fine_samples": 3000,
+          "fine_passes": 200
+        }
+      },
+      "camera": {
+        "output": [640, 360],
+        "sensor": [1280, 720],
+        "format": "NV21",
+        "exposure_us": 1000,
+        "gain": 1024,
+        "again": 1024,
+        "dgain": 1024,
+        "isp_dgain": 1024,
+        "awb_auto": false,
+        "streaming": true,
+        "isp": {
+          "valid": true,
+          "exposure_us": 999,
+          "again": 1024,
+          "dgain": 1024,
+          "isp_dgain": 1024,
+          "iso": 100,
+          "average_luma": 7,
+          "awb_auto": false,
+          "wb_valid": true,
+          "wb_gain": [2095, 1024, 1024, 1974],
+          "color_temperature": 5432
+        }
+      },
+      "view": {
+        "profile": "wide_640x360",
+        "crop_enabled": false,
+        "crop": [0, 0, 1280, 720],
+        "pre_rotation_output": [640, 360],
+        "rotation": 0,
+        "visible_offset_x": 0,
+        "output": [640, 360],
+        "scale": [0.5, 0.5],
+        "coordinate_space": "view"
+      },
+      "overlay": {"enabled": true, "roi": true},
+      "control": {
+        "mode": "angle_rad",
+        "fx": 277.0,
+        "fy": 277.0,
+        "roll_unit": "deg",
+        "roll_sign": 1.0,
+        "distance": 0.0
+      },
+      "uart": {
+        "open": true,
+        "rx_bytes": 0,
+        "rx_packets": 0,
+        "crc_errors": 0,
+        "align_drops": 0,
+        "tx_packets": 8990,
+        "tx_errors": 0,
+        "tx_last_gap_us": 12500,
+        "tx_min_gap_us": 12400,
+        "tx_max_gap_us": 13000,
+        "telemetry_valid": false,
+        "pitch": 0.0,
+        "roll": 0.0,
+        "yaw": 0.0,
+        "air_speed": 0.0
+      },
+      "stream": {
+        "rtsp_enabled": true,
+        "rtsp_port": 8554,
+        "recording": false,
+        "record_path": "",
+        "record_every_n": 1,
+        "record_fps": 80,
+        "source_frames": 9000,
+        "input_frames": 8998,
+        "rtsp_clients": 1,
+        "encoded_frames": 8995,
+        "encoded_bytes": 10485760,
+        "record_errors": 0
+      },
+      "debug": {"clients": 1, "accepted": 10, "commands": 3, "errors": 0}
+    }
+  }
+}

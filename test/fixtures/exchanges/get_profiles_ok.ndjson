@@ -1,0 +1,2 @@
+{"v":1,"type":"accepted","id":42,"mono_us":123456789}
+{"v":1,"type":"result","id":42,"ok":true,"state":"STOPPED","config_rev":184,"payload":{"full_wide_640x360":{"readout":"full_1280x720_80","view":"wide_640x360","features":"debug","status":"stable","expected":{"sensor":[1280,720],"output":[640,360],"fps":80}},"full_square_360":{"readout":"full_1280x720_80","view":"square_360","features":"debug","expected":{"sensor":[1280,720],"output":[360,360],"fps":80}},"new_future_profile":{"readout":"future_readout","view":"future_view","features":"idle","unknown_kind":"thing"}}}

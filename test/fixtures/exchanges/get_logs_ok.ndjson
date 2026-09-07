@@ -1,0 +1,2 @@
+{"v":1,"type":"accepted","id":42,"mono_us":1}
+{"v":1,"type":"result","id":42,"ok":true,"state":"STREAMING","config_rev":184,"payload":{"lines":["[INFO] worker up profile=full_wide_640x360","[INFO] sensor GC4653 1280x720@80","[DEBUG] framing ok"]}}

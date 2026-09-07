@@ -1,0 +1,2 @@
+{"v":1,"type":"accepted","id":42,"mono_us":123456789}
+{"v":1,"type":"result","id":42,"ok":false,"state":"STREAMING","config_rev":184,"error":"gain verification failed: requested=1024/1024/1024 actual=..."}

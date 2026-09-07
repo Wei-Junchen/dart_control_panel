@@ -1,0 +1,2 @@
+{"v":1,"type":"accepted","id":42,"mono_us":123456789}
+{"v":1,"type":"result","id":42,"ok":false,"state":"STREAMING","config_rev":184,"error":"readout apply failed: gain verification failed; rolled back to full_wide_640x360"}

@@ -1,0 +1,2 @@
+{"v":1,"type":"accepted","id":42,"mono_us":123456789}
+{"v":1,"type":"result","id":42,"ok":true,"state":"STREAMING","config_rev":184,"payload":{"confirm":true,"delay_s":5,"reboot_at_mono_us":123456789012}}

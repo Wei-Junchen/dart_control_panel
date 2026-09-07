@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Protocol/models/forms run headless — hardware tests (RTSP on the
+      # board, real libmpv playback) are intentionally NOT part of CI.
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
