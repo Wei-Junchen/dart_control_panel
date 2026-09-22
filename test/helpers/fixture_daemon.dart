@@ -11,7 +11,8 @@ class FixtureDaemon {
   final List<(String, Map<String, dynamic>, int)> requests = [];
 
   static Future<FixtureDaemon> start(
-      Future<String> Function(String op) body) async {
+    Future<String> Function(String op) body,
+  ) async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final daemon = FixtureDaemon(server);
     server.listen((socket) {

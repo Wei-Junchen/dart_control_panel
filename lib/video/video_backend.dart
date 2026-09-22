@@ -3,27 +3,15 @@ import 'package:flutter/widgets.dart';
 import 'package:dart_control_panel/models/daemon_state.dart';
 
 /// Video transport-level state, independent of the control plane.
-enum VideoStatus {
-  idle,
-  connecting,
-  buffering,
-  playing,
-  paused,
-  error,
-}
+enum VideoStatus { idle, connecting, buffering, playing, paused, error }
 
 extension VideoStatusX on VideoStatus {
-  bool get isActive => this == VideoStatus.playing || this == VideoStatus.buffering;
+  bool get isActive =>
+      this == VideoStatus.playing || this == VideoStatus.buffering;
 }
 
 /// Event emitted by a [VideoBackend] (decoder/library state).
-enum VideoBackendEventKind {
-  buffering,
-  playing,
-  paused,
-  stopped,
-  error,
-}
+enum VideoBackendEventKind { buffering, playing, paused, stopped, error }
 
 class VideoBackendEvent {
   const VideoBackendEvent(this.kind, {this.message});

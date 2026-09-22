@@ -1,4 +1,5 @@
-import 'package:fake_async/fake_async.dart';import 'package:flutter_test/flutter_test.dart';
+import 'package:fake_async/fake_async.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:dart_control_panel/controllers/connection_controller.dart';
 import 'package:dart_control_panel/controllers/state_poll_controller.dart';
@@ -14,10 +15,8 @@ class _NoopDaemonClient extends DaemonClient {
 
 /// Scriptable repository stand-in (no sockets involved).
 class _ScriptedRepository extends BoardRepository {
-  _ScriptedRepository({
-    this.slow = Duration.zero,
-    this.failWith,
-  }) : super(_NoopDaemonClient());
+  _ScriptedRepository({this.slow = Duration.zero, this.failWith})
+    : super(_NoopDaemonClient());
 
   Duration slow;
   ProtocolException? failWith;
@@ -73,8 +72,12 @@ void main() {
 
     test('application-level failures do not count towards backoff', () {
       final c = ConnectionController();
-      c.onPollFailure(const OperationFailedException('gain verification failed',
-          op: 'apply_runtime'));
+      c.onPollFailure(
+        const OperationFailedException(
+          'gain verification failed',
+          op: 'apply_runtime',
+        ),
+      );
       expect(c.consecutiveFailures, 0);
       expect(c.nextPollInterval(), const Duration(milliseconds: 500));
     });
@@ -84,8 +87,10 @@ void main() {
         baseInterval: const Duration(milliseconds: 500),
         inactiveOverride: const Duration(seconds: 2),
       );
-      expect(c.nextPollInterval(windowActive: false),
-          const Duration(seconds: 2));
+      expect(
+        c.nextPollInterval(windowActive: false),
+        const Duration(seconds: 2),
+      );
       c.consecutiveFailures = 5;
       final backed = c.nextPollInterval(windowActive: false);
       expect(backed >= const Duration(seconds: 2), isTrue);
@@ -144,13 +149,16 @@ void main() {
       });
     });
 
-    test('transport failures freeze state and back off the polling rate',
-        () {
+    test('transport failures freeze state and back off the polling rate', () {
       fakeAsync((async) {
-        final repo =
-            _ScriptedRepository(failWith: const ProtocolTransportClosed('cable unplugged'));
+        final repo = _ScriptedRepository(
+          failWith: const ProtocolTransportClosed('cable unplugged'),
+        );
         final connection = ConnectionController();
-        final poll = StatePollController(repository: repo, connection: connection);
+        final poll = StatePollController(
+          repository: repo,
+          connection: connection,
+        );
         poll.start();
         async.elapse(const Duration(milliseconds: 500));
         expect(poll.state, isNull);
@@ -164,18 +172,20 @@ void main() {
         expect(poll.connection.isConnected, isFalse);
         expect(
           poll.connection.status,
-          anyOf(BoardConnectionStatus.reconnecting,
-              BoardConnectionStatus.disconnected),
+          anyOf(
+            BoardConnectionStatus.reconnecting,
+            BoardConnectionStatus.disconnected,
+          ),
         );
         poll.stop();
       });
     });
 
-    test('recovering from failure resumes fast polling and clears error',
-        () {
+    test('recovering from failure resumes fast polling and clears error', () {
       fakeAsync((async) {
         final repo = _ScriptedRepository(
-            failWith: const ProtocolTransportClosed('probe failed'));
+          failWith: const ProtocolTransportClosed('probe failed'),
+        );
         final poll = StatePollController(
           repository: repo,
           connection: ConnectionController(),
@@ -191,7 +201,9 @@ void main() {
         expect(poll.lastError, isNull);
         expect(poll.connection.isConnected, isTrue);
         expect(
-            poll.connection.nextPollInterval(), const Duration(milliseconds: 500));
+          poll.connection.nextPollInterval(),
+          const Duration(milliseconds: 500),
+        );
         poll.stop();
       });
     });

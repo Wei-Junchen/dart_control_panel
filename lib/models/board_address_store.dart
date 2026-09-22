@@ -17,18 +17,18 @@ class BoardAddress {
   String get label => '$host:$port';
 
   factory BoardAddress.fromJson(Map<String, dynamic> json) => BoardAddress(
-        host: json['host'] is String ? json['host'] as String : '',
-        port: json['port'] is num ? (json['port'] as num).toInt() : 9000,
-        lastUsed: json['last_used'] is String
-            ? DateTime.tryParse(json['last_used'] as String) ?? DateTime.now()
-            : DateTime.now(),
-      );
+    host: json['host'] is String ? json['host'] as String : '',
+    port: json['port'] is num ? (json['port'] as num).toInt() : 9000,
+    lastUsed: json['last_used'] is String
+        ? DateTime.tryParse(json['last_used'] as String) ?? DateTime.now()
+        : DateTime.now(),
+  );
 
   Map<String, dynamic> toJson() => {
-        'host': host,
-        'port': port,
-        'last_used': lastUsed.toIso8601String(),
-      };
+    'host': host,
+    'port': port,
+    'last_used': lastUsed.toIso8601String(),
+  };
 }
 
 /// Persists the list of board addresses and the last-used endpoint.
@@ -47,9 +47,7 @@ class BoardAddressStore {
     final configHome = Platform.environment['XDG_CONFIG_HOME']?.trim();
     final base = (configHome != null && configHome.isNotEmpty)
         ? Directory(configHome)
-        : Directory(
-            '${Platform.environment['HOME'] ?? '.'}/.config',
-          );
+        : Directory('${Platform.environment['HOME'] ?? '.'}/.config');
     return File('${base.path}/dart_control_panel/addresses.json');
   }
 
@@ -78,25 +76,34 @@ class BoardAddressStore {
 
   /// Upserts host:port, bumps `last_used`, keeps at most [maxEntries].
   Future<void> remember(String host, int port) async {
-    final addresses = load().where((a) => !(a.host == host && a.port == port)).toList();
+    final addresses = load()
+        .where((a) => !(a.host == host && a.port == port))
+        .toList();
     addresses.insert(
-        0, BoardAddress(host: host, port: port, lastUsed: DateTime.now()));
+      0,
+      BoardAddress(host: host, port: port, lastUsed: DateTime.now()),
+    );
     if (addresses.length > maxEntries) {
       addresses.removeRange(maxEntries, addresses.length);
     }
     try {
       _file.parent.createSync(recursive: true);
-      await _file.writeAsString(jsonEncode([for (final a in addresses) a.toJson()]));
+      await _file.writeAsString(
+        jsonEncode([for (final a in addresses) a.toJson()]),
+      );
     } catch (_) {
       // persistence is best-effort; never crash the UI over a settings file
     }
   }
 
   Future<void> remove(String host, int port) async {
-    final addresses =
-        load().where((a) => !(a.host == host && a.port == port)).toList();
+    final addresses = load()
+        .where((a) => !(a.host == host && a.port == port))
+        .toList();
     try {
-      await _file.writeAsString(jsonEncode([for (final a in addresses) a.toJson()]));
+      await _file.writeAsString(
+        jsonEncode([for (final a in addresses) a.toJson()]),
+      );
     } catch (_) {}
   }
 }

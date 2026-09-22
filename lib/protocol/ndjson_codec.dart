@@ -9,7 +9,7 @@ import 'protocol_exception.dart';
 /// This class is pure Dart (no Flutter dependency) so it can be unit tested
 /// and reused from the CLI.
 class NdjsonCodec {
-  NdjsonCodec({this.maxLineBytes = 8192});
+  NdjsonCodec({this.maxLineBytes = 65536});
 
   final int maxLineBytes;
 
@@ -25,13 +25,8 @@ class NdjsonCodec {
     if (op.isEmpty) {
       throw ArgumentError('op must not be empty');
     }
-    final line = '${jsonEncode({
-          'v': 1,
-          'type': 'request',
-          'id': id,
-          'op': op,
-          'args': args ?? <String, dynamic>{},
-        })}\n';
+    final line =
+        '${jsonEncode({'v': 1, 'type': 'request', 'id': id, 'op': op, 'args': args ?? <String, dynamic>{}})}\n';
     if (utf8.encode(line).length > maxLineBytes) {
       throw ProtocolCodecException(
         'request line exceeds $maxLineBytes bytes (${utf8.encode(line).length})',
@@ -71,11 +66,11 @@ enum StreamDecodeEventKind { line, error }
 
 class StreamDecodeEvent {
   const StreamDecodeEvent.line(this.line)
-      : kind = StreamDecodeEventKind.line,
-        error = null;
+    : kind = StreamDecodeEventKind.line,
+      error = null;
   const StreamDecodeEvent.error(this.error)
-      : kind = StreamDecodeEventKind.error,
-        line = null;
+    : kind = StreamDecodeEventKind.error,
+      line = null;
 
   final StreamDecodeEventKind kind;
   final Map<String, dynamic>? line;
@@ -109,33 +104,41 @@ class StreamDecoder {
     final lineBytes = _buffer.getRange(0, length).toList();
     _buffer.clear();
     if (length > maxLineBytes) {
-      _events.add(StreamDecodeEvent.error(
-        const ProtocolDecodeException('line exceeds maximum allowed length'),
-      ));
+      _events.add(
+        StreamDecodeEvent.error(
+          const ProtocolDecodeException('line exceeds maximum allowed length'),
+        ),
+      );
       return;
     }
     String text;
     try {
       text = utf8.decode(lineBytes, allowMalformed: false);
     } on FormatException catch (e) {
-      _events.add(StreamDecodeEvent.error(
-        ProtocolDecodeException('invalid UTF-8: ${e.message}', cause: e),
-      ));
+      _events.add(
+        StreamDecodeEvent.error(
+          ProtocolDecodeException('invalid UTF-8: ${e.message}', cause: e),
+        ),
+      );
       return;
     }
     final Object? decoded;
     try {
       decoded = jsonDecode(text);
     } on FormatException catch (e) {
-      _events.add(StreamDecodeEvent.error(
-        ProtocolDecodeException('invalid JSON: ${e.message}', cause: e),
-      ));
+      _events.add(
+        StreamDecodeEvent.error(
+          ProtocolDecodeException('invalid JSON: ${e.message}', cause: e),
+        ),
+      );
       return;
     }
     if (decoded is! Map<String, dynamic>) {
-      _events.add(const StreamDecodeEvent.error(
-        ProtocolDecodeException('expected a JSON object'),
-      ));
+      _events.add(
+        const StreamDecodeEvent.error(
+          ProtocolDecodeException('expected a JSON object'),
+        ),
+      );
       return;
     }
     _events.add(StreamDecodeEvent.line(decoded));
@@ -145,9 +148,11 @@ class StreamDecoder {
   /// once after the socket closes.
   void close() {
     if (_buffer.isNotEmpty) {
-      _events.add(const StreamDecodeEvent.error(
-        ProtocolDecodeException('connection closed in the middle of a line'),
-      ));
+      _events.add(
+        const StreamDecodeEvent.error(
+          ProtocolDecodeException('connection closed in the middle of a line'),
+        ),
+      );
       _buffer.clear();
     }
     unawaited(_events.close());

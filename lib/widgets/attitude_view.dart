@@ -24,11 +24,8 @@ class _Vec3 {
 
   double dot(_Vec3 o) => x * o.x + y * o.y + z * o.z;
 
-  _Vec3 cross(_Vec3 o) => _Vec3(
-        y * o.z - z * o.y,
-        z * o.x - x * o.z,
-        x * o.y - y * o.x,
-      );
+  _Vec3 cross(_Vec3 o) =>
+      _Vec3(y * o.z - z * o.y, z * o.x - x * o.z, x * o.y - y * o.x);
 
   double get length => math.sqrt(x * x + y * y + z * z);
 
@@ -72,10 +69,7 @@ class _Camera {
     final x = rel.dot(right);
     final y = rel.dot(up);
     final scale = z > 1e-9 ? focal / z : 0.0;
-    return Offset(
-      size.width / 2 + x * scale,
-      size.height / 2 - y * scale,
-    );
+    return Offset(size.width / 2 + x * scale, size.height / 2 - y * scale);
   }
 
   /// View-space depth (larger = closer to the camera); used for sorting.
@@ -131,21 +125,26 @@ class _MissileGeometry {
       final dir = _Vec3(math.cos(rad), math.sin(rad), 0);
       final inner = dir * 0.17;
       final outer = dir * 0.62;
-      faces.add(_Face(finColor, [
-        inner + const _Vec3(0, 0, -0.55),
-        inner + const _Vec3(0, 0, tailZ),
-        outer + const _Vec3(0, 0, tailZ),
-        outer + const _Vec3(0, 0, -0.55),
-      ]));
+      faces.add(
+        _Face(finColor, [
+          inner + const _Vec3(0, 0, -0.55),
+          inner + const _Vec3(0, 0, tailZ),
+          outer + const _Vec3(0, 0, tailZ),
+          outer + const _Vec3(0, 0, -0.55),
+        ]),
+      );
     }
     return faces;
   }
 
   static List<_Vec3> _ring(double z, double r, int n) => [
-        for (var i = 0; i < n; i++)
-          _Vec3(r * math.cos(2 * math.pi * i / n),
-              r * math.sin(2 * math.pi * i / n), z),
-      ];
+    for (var i = 0; i < n; i++)
+      _Vec3(
+        r * math.cos(2 * math.pi * i / n),
+        r * math.sin(2 * math.pi * i / n),
+        z,
+      ),
+  ];
 }
 
 /// Body-frame rotation from attitude angles (degrees):
@@ -166,16 +165,16 @@ class _AttitudeRotation {
   }
 
   static _Vec3 _rotZ(_Vec3 p, double a) => _Vec3(
-        p.x * math.cos(a) - p.y * math.sin(a),
-        p.x * math.sin(a) + p.y * math.cos(a),
-        p.z,
-      );
+    p.x * math.cos(a) - p.y * math.sin(a),
+    p.x * math.sin(a) + p.y * math.cos(a),
+    p.z,
+  );
 
   static _Vec3 _rotY(_Vec3 p, double a) => _Vec3(
-        p.x * math.cos(a) + p.z * math.sin(a),
-        p.y,
-        -p.x * math.sin(a) + p.z * math.cos(a),
-      );
+    p.x * math.cos(a) + p.z * math.sin(a),
+    p.y,
+    -p.x * math.sin(a) + p.z * math.cos(a),
+  );
 }
 
 /// 3D missile attitude indicator, viewed from behind-left:
@@ -248,24 +247,39 @@ class _AttitudePainter extends CustomPainter {
     final camera = _Camera();
 
     // ground/inertial frame: fixed at the missile center, never rotates
-    _paintAxisFrame(canvas, size, camera, rotation, _worldAxes,
-        worldFrame: true);
+    _paintAxisFrame(
+      canvas,
+      size,
+      camera,
+      rotation,
+      _worldAxes,
+      worldFrame: true,
+    );
     _paintMissile(canvas, size, camera, rotation);
     // rigid-body frame: driven by the attitude; drawn last so it stays
     // readable even when it overlaps with the world frame (level attitude)
-    _paintAxisFrame(canvas, size, camera, rotation, _bodyAxes,
-        worldFrame: false);
+    _paintAxisFrame(
+      canvas,
+      size,
+      camera,
+      rotation,
+      _bodyAxes,
+      worldFrame: false,
+    );
   }
 
   void _paintMissile(
-      Canvas canvas, Size size, _Camera camera, _AttitudeRotation rotation) {
+    Canvas canvas,
+    Size size,
+    _Camera camera,
+    _AttitudeRotation rotation,
+  ) {
     final projected = <({double depth, Path path, Color color})>[];
     for (final face in _MissileGeometry().build()) {
       final world = [for (final p in face.points) rotation.apply(p)];
       final offsets = [for (final p in world) camera.project(p, size)];
       final depth = world.map(camera.depth).reduce(math.min);
-      final path = Path()
-        ..moveTo(offsets.first.dx, offsets.first.dy);
+      final path = Path()..moveTo(offsets.first.dx, offsets.first.dy);
       for (final o in offsets.skip(1)) {
         path.lineTo(o.dx, o.dy);
       }
@@ -276,10 +290,13 @@ class _AttitudePainter extends CustomPainter {
     projected.sort((a, b) => a.depth.compareTo(b.depth));
     for (final f in projected) {
       canvas.drawPath(f.path, Paint()..color = f.color);
-      canvas.drawPath(f.path, Paint()
-        ..color = const Color(0x33000000)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.8);
+      canvas.drawPath(
+        f.path,
+        Paint()
+          ..color = const Color(0x33000000)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.8,
+      );
     }
     // center marker (rotation pivot)
     final c = camera.project(const _Vec3(0, 0, 0), size);
@@ -302,9 +319,13 @@ class _AttitudePainter extends CustomPainter {
     for (final (dir, color, label) in axes) {
       final rotated = worldFrame ? dir : rotation.apply(dir);
       final end = camera.project(at + rotated * _axisLen, size);
-      canvas.drawLine(origin, end, Paint()
-        ..color = color
-        ..strokeWidth = worldFrame ? 2.0 : 1.6);
+      canvas.drawLine(
+        origin,
+        end,
+        Paint()
+          ..color = color
+          ..strokeWidth = worldFrame ? 2.0 : 1.6,
+      );
       final tp = TextPainter(
         text: TextSpan(
           text: label,

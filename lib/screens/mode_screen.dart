@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'package:dart_control_panel/controllers/board_session.dart';
 import 'package:dart_control_panel/models/daemon_state.dart';
-import 'package:dart_control_panel/models/profile.dart';
 import 'package:dart_control_panel/widgets/connection_bar.dart';
 import 'package:dart_control_panel/widgets/metric_card.dart';
 import 'package:dart_control_panel/widgets/state_dashboard.dart';
 
-/// P4/新导航 — 模式页：Ground ↔ Flight 切换（set_mode，见 update.md），
-/// 并收纳原 Camera + Features 的板端控制（生命周期/readout/rotation/
-/// presets/custom features/录像/重启）。
+/// The board exposes exactly two policy modes.  Mode switching is atomic on
+/// the daemon; individual RTSP/recording feature toggles intentionally do not
+/// exist in the current protocol.
 class ModeScreen extends StatefulWidget {
   const ModeScreen({super.key, required this.session});
 
@@ -20,105 +19,50 @@ class ModeScreen extends StatefulWidget {
 }
 
 class _ModeScreenState extends State<ModeScreen> {
-  Map<String, Profile> _profiles = const {};
-  String? _selectedProfile;
-  int _rotation = 0;
-  final TextEditingController _recordEveryN = TextEditingController(text: '4');
-  bool _loaded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.session.addListener(_onSessionChanged);
-  }
-
-  @override
-  void dispose() {
-    widget.session.removeListener(_onSessionChanged);
-    _recordEveryN.dispose();
-    super.dispose();
-  }
-
-  void _onSessionChanged() {
-    if (mounted) setState(() {});
-    _maybeLoad();
-  }
-
-  void _maybeLoad() {
-    final session = widget.session;
-    if (_loaded || session.state == null) return;
-    _loaded = true;
-    final repo = session.repository;
-    if (repo == null) return;
-    repo.getProfiles().then((profiles) {
-      if (!mounted) return;
-      setState(() {
-        _profiles = profiles;
-        final current = session.state;
-        _selectedProfile = (current?.profile.isNotEmpty ?? false)
-            ? current!.profile
-            : profiles.keys.firstOrNull;
-        _rotation = current?.rotation ?? 0;
-      });
-    }).catchError((Object e) {
-      session.setStatus('get_profiles failed: $e', error: true);
-    });
-    final worker = session.state!.worker;
-    if (worker != null) {
-      _recordEveryN.text = '${worker.stream.recordEveryN}';
-    }
-  }
-
-  Future<void> _mutate(
-      String label, Future<void> Function(BoardSession) op) async {
-    final session = widget.session;
-    if (!session.connected) return;
-    try {
-      await session.mutate(label, (repo) async => op(session));
-    } catch (_) {
-      // error already surfaced via session status
-    }
-    if (mounted) {
-      setState(() {
-        _rotation = widget.session.state?.rotation ?? _rotation;
-        final s = widget.session.state;
-        if (s != null && s.profile.isNotEmpty) _selectedProfile = s.profile;
-      });
-    }
-  }
-
-  int? get _recordEveryNValue => int.tryParse(_recordEveryN.text.trim());
-
-  // --- mode switch ---------------------------------------------------------
-
   Future<void> _switchMode(String mode) async {
-    final session = widget.session;
-    try {
-      await session.mutate('set_mode $mode',
-          (repo) => repo.setMode(mode));
-    } on Exception catch (e) {
-      final text = '$e';
-      final unknown = text.contains('unknown op') || text.contains('not implemented');
-      session.setStatus(
-        unknown
-            ? 'The board does not implement set_mode yet — see update.md for the proposed interface'
-            : 'mode switch rejected: $text',
-        error: true,
+    if (mode == widget.session.state?.mode) return;
+    if (mode == 'flight') {
+      final ok = await _confirm(
+        '切换到空中飞行模式',
+        'RTSP 会立即停止，画面设置锁定；相机完成初始化后进入待发射 standby。',
+        '切换到 Flight',
       );
+      if (!ok) return;
+    }
+    try {
+      await widget.session.mutate(
+        'set_operating_mode $mode',
+        (repo) => repo.setOperatingMode(mode),
+      );
+    } catch (_) {
+      // BoardSession already exposes the daemon error.
     }
   }
 
-  Future<void> _confirmSwitchMode(String mode) async {
-    if (mode == 'flight' &&
-        !(await _confirm(
-          '切换到 Flight 模式',
-          'Flight 模式建议板端关闭 RTSP、开启内录并持续记录遥测。\n'
-              '确认切换？',
-          '切换',
-        ))) {
+  Future<void> _restart() async {
+    try {
+      await widget.session.mutate(
+        'restart_worker',
+        (repo) => repo.restartWorker(),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _setFlightActive(bool active) async {
+    if (active &&
+        !await _confirm(
+          '开始飞行记录',
+          '相机将立即 wake，并开始识别、H.264 录像、UART 和 UDP 遥测。',
+          '开始',
+        )) {
       return;
     }
-    await _switchMode(mode);
+    try {
+      await widget.session.mutate(
+        'set_flight_active $active',
+        (repo) => repo.setFlightActive(active),
+      );
+    } catch (_) {}
   }
 
   @override
@@ -138,490 +82,196 @@ class _ModeScreenState extends State<ModeScreen> {
             ],
           ),
           body: state == null
-              ? _notConnected(context)
-              : _buildBody(context, session, state),
+              ? const Center(child: Text('请先连接开发板'))
+              : _body(context, state),
         );
       },
     );
   }
 
-  Widget _notConnected(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.track_changes, size: 48, color: Colors.grey),
-          const SizedBox(height: 8),
-          Text(
-            'Connect once (bottom-left) to switch modes and control the board',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBody(
-      BuildContext context, BoardSession session, DaemonState state) {
-    final busy = session.busy;
-    final transitional = state.isTransitional || state.modeTransition;
-    final canMutate = !busy && !transitional;
-    final currentMode = state.mode == 'flight' ? 'flight' : 'ground';
-
+  Widget _body(BuildContext context, DaemonState state) {
+    final session = widget.session;
+    final busy = session.busy || state.isTransitional || state.modeTransition;
+    final flight = state.mode == 'flight';
+    final udp = state.worker?.udpTelemetry;
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
         DaemonCard(state: state),
         const SizedBox(height: 12),
-        _modeCard(context, session, state, canMutate, currentMode),
-        const SizedBox(height: 12),
-        if (state.resources.needsReboot)
-          Card(
-            margin: EdgeInsets.zero,
-            color: Theme.of(context).colorScheme.errorContainer,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                      child: Text('Board requests a reboot to apply changes.')),
-                  const SizedBox(width: 12),
-                  FilledButton(
-                    onPressed: busy ? null : _confirmReboot,
-                    child: const Text('Reboot'),
-                  ),
-                ],
-              ),
-            ),
+        MetricCard(
+          title: '运行模式',
+          trailing: Badge(
+            label: Text(flight ? 'FLIGHT' : 'GROUND'),
+            backgroundColor: flight ? Colors.deepOrange : Colors.teal,
           ),
-        _section(
-          context,
-          'Board control',
-          initiallyExpanded: true,
           children: [
-            _lifecycleCard(context, session, state, canMutate),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: 'ground',
+                  label: Text('Ground 地面'),
+                  icon: Icon(Icons.tune),
+                ),
+                ButtonSegment(
+                  value: 'flight',
+                  label: Text('Flight 空中'),
+                  icon: Icon(Icons.flight_takeoff),
+                ),
+              ],
+              selected: {flight ? 'flight' : 'ground'},
+              onSelectionChanged: busy ? null : (v) => _switchMode(v.first),
+            ),
             const SizedBox(height: 12),
-            _pictureCard(context, session, state, canMutate),
+            Text(
+              flight
+                  ? '空中：RTSP 关闭，画面参数锁定；未激活时相机保持 standby。'
+                  : '地面：RTSP 实时预览开启，可修改视频模式、绿色阈值、ROI 与 ISP 参数。',
+            ),
+            const SizedBox(height: 8),
+            StatRow(label: 'RTSP', value: state.features.rtsp ? 'on' : 'off'),
+            StatRow(
+              label: 'image settings',
+              value: state.imageSettingsLocked ? 'locked' : 'editable',
+            ),
+            StatRow(
+              label: 'recording',
+              value: state.features.recording ? 'active' : 'stopped',
+            ),
           ],
         ),
-        _section(
-          context,
-          'Features & recording',
-          initiallyExpanded: false,
-          children: [
-            _featuresCard(context, session, state, canMutate),
-          ],
-        ),
-        _section(context, 'System', initiallyExpanded: false, children: [
+        if (flight) ...[
+          const SizedBox(height: 12),
           MetricCard(
-            title: 'Board',
+            title: '飞行触发',
+            trailing: Badge(
+              label: Text(state.flight.state),
+              backgroundColor: state.flight.active
+                  ? Colors.red
+                  : Colors.blueGrey,
+            ),
             children: [
-              StatRow(
-                  label: 'reboot needed',
-                  value: '${state.resources.needsReboot}'),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: busy ? null : _confirmReboot,
-                icon: const Icon(Icons.power_settings_new),
-                label: const Text('Reboot board (double confirm)'),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('flight_active'),
+                subtitle: Text(
+                  state.flight.active
+                      ? '识别、录像、UART、UDP 正在运行'
+                      : '相机已初始化并处于 standby',
+                ),
+                value: state.flight.active,
+                onChanged: busy ? null : _setFlightActive,
               ),
+              if (state.flight.triggerSource.isNotEmpty)
+                StatRow(label: 'trigger', value: state.flight.triggerSource),
+              if (state.flight.telemetryHost.isNotEmpty)
+                StatRow(label: 'UDP target', value: state.flight.telemetryHost),
+              if (state.flight.recordPath.isNotEmpty)
+                StatRow(label: 'video', value: state.flight.recordPath),
+              if (state.flight.telemetryPath.isNotEmpty)
+                StatRow(label: 'telemetry', value: state.flight.telemetryPath),
+              if (!state.flight.active &&
+                  state.flight.lastRecordPath.isNotEmpty)
+                StatRow(
+                  label: 'last video',
+                  value: state.flight.lastRecordPath,
+                ),
             ],
           ),
-        ]),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  Widget _section(BuildContext context, String title,
-      {required List<Widget> children, bool initiallyExpanded = false}) {
-    if (children.length == 1) {
-      return children.first;
-    }
-    return Card(
-      margin: EdgeInsets.zero,
-      child: ExpansionTile(
-        title: Text(title,
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w600)),
-        initiallyExpanded: initiallyExpanded,
-        childrenPadding: const EdgeInsets.symmetric(
-            horizontal: 12, vertical: 12),
-        children: children,
-      ),
-    );
-  }
-
-  Widget _modeCard(BuildContext context, BoardSession session,
-      DaemonState state, bool canMutate, String currentMode) {
-    final pending = state.modePending;
-    return MetricCard(
-      title: 'Mode',
-      trailing: Badge(
-        label: Text(
-          pending != null
-              ? 'switching → $pending'
-              : currentMode.toUpperCase(),
-        ),
-        backgroundColor: currentMode == 'flight'
-            ? Colors.deepOrange
-            : Colors.teal,
-      ),
-      children: [
-        SegmentedButton<String>(
-          segments: const [
-            ButtonSegment(
-              value: 'ground',
-              label: Text('Ground'),
-              icon: Icon(Icons.science_outlined),
-            ),
-            ButtonSegment(
-              value: 'flight',
-              label: Text('Flight'),
-              icon: Icon(Icons.flight_takeoff),
-            ),
-          ],
-          selected: {currentMode},
-          onSelectionChanged: canMutate
-              ? (selection) => _confirmSwitchMode(selection.first)
-              : null,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          currentMode == 'flight'
-              ? 'Flight: 内录 + 遥测记录，板端建议关闭 RTSP（影像页会提示不可用）。'
-              : 'Ground: 实时回传影像用于识别调参（RTSP on）。',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        if (state.modePending != null)
-          const SizedBox(
-              width: double.infinity,
-              child: LinearProgressIndicator(minHeight: 2)),
-        if (session.statusMessage?.contains('set_mode') == true)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              session.statusMessage!,
-              style: TextStyle(
-                  color: session.statusError
-                      ? Theme.of(context).colorScheme.error
-                      : null),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _lifecycleCard(BuildContext context, BoardSession session,
-      DaemonState state, bool canMutate) {
-    final stateName = state.state;
-    return MetricCard(
-      title: 'Worker lifecycle',
-      children: [
-        _profilePicker(canMutate: canMutate),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        ],
+        const SizedBox(height: 12),
+        MetricCard(
+          title: 'UDP 遥测',
           children: [
-            FilledButton.icon(
-              onPressed: canMutate &&
-                      (stateName == 'STOPPED' ||
-                          stateName == 'ERROR' ||
-                          stateName == 'STANDBY')
-                  ? () => _mutate('start_worker', (s) async =>
-                      s.repository!.startWorker(profile: _selectedProfile))
-                  : null,
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('Start'),
+            StatRow(
+              label: 'publisher',
+              value: udp?.active == true
+                  ? 'sending'
+                  : (udp?.running == true ? 'armed / silent' : 'stopped'),
             ),
-            FilledButton.icon(
-              onPressed: canMutate && stateName == 'STREAMING'
-                  ? () => _mutate('stop_worker',
-                      (s) async => s.repository!.stopWorker())
-                  : null,
-              icon: const Icon(Icons.stop),
-              label: const Text('Stop'),
+            StatRow(
+              label: 'destination',
+              value: udp == null
+                  ? '-'
+                  : '${udp.host}:${udp.port} @ ${udp.hz} Hz',
             ),
-            OutlinedButton.icon(
-              onPressed: canMutate && stateName == 'STREAMING'
-                  ? () => _mutate('restart_worker',
-                      (s) async => s.repository!.restartWorker())
-                  : null,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Restart'),
+            StatRow(
+              label: 'packets / errors',
+              value: udp == null
+                  ? '- / -'
+                  : '${udp.sentPackets} / ${udp.sendErrors}',
             ),
-            OutlinedButton.icon(
-              onPressed: canMutate && stateName == 'STREAMING'
-                  ? () => _mutate('camera_standby',
-                      (s) async => s.repository!.cameraStandby())
-                  : null,
-              icon: const Icon(Icons.power),
-              label: const Text('Standby'),
-            ),
-            OutlinedButton.icon(
-              onPressed: canMutate &&
-                      (stateName == 'STANDBY' ||
-                          stateName == 'STANDBY_PENDING')
-                  ? () => _mutate('camera_wake',
-                      (s) async => s.repository!.cameraWake())
-                  : null,
-              icon: const Icon(Icons.wb_sunny),
-              label: const Text('Wake'),
+            StatRow(
+              label: 'last send age',
+              value: udp == null || udp.lastSendAgeMs < 0
+                  ? '-'
+                  : '${udp.lastSendAgeMs} ms',
             ),
           ],
-        ),
-      ],
-    );
-  }
-
-  Widget _pictureCard(BuildContext context, BoardSession session,
-      DaemonState state, bool canMutate) {
-    return MetricCard(
-      title: 'Readout profile & rotation',
-      children: [
-        _profilePicker(canMutate: canMutate, forReadout: true),
-        const SizedBox(height: 8),
-        FilledButton.tonal(
-          onPressed: canMutate &&
-                  _selectedProfile != null &&
-                  _selectedProfile != state.profile
-              ? () => _mutate('apply_readout_profile', (s) async =>
-                  s.repository!.applyReadoutProfile(_selectedProfile!))
-              : null,
-          child: const Text('Apply readout profile (rolls back on failure)'),
         ),
         const SizedBox(height: 12),
-        SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(value: 0, label: Text('0°')),
-            ButtonSegment(value: 90, label: Text('90°')),
-            ButtonSegment(value: 180, label: Text('180°')),
-            ButtonSegment(value: 270, label: Text('270°')),
-          ],
-          selected: {_rotation},
-          onSelectionChanged: !canMutate
-              ? null
-              : (selection) => setState(() => _rotation = selection.first),
-        ),
-        const SizedBox(height: 8),
-        FilledButton.tonal(
-          onPressed: canMutate && _rotation != state.rotation
-              ? () => _mutate('set_rotation',
-                  (s) async => s.repository!.setRotation(_rotation))
-              : null,
-          child: const Text('Apply rotation (restarts while running)'),
-        ),
-      ],
-    );
-  }
-
-  Widget _featuresCard(BuildContext context, BoardSession session,
-      DaemonState state, bool canMutate) {
-    final features = state.features;
-    final worker = state.worker;
-    return MetricCard(
-      title: 'Features / recording',
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        MetricCard(
+          title: '系统',
           children: [
-            for (final preset in ['debug', 'training', 'competition', 'idle'])
-              ChoiceChip(
-                label: Text(preset),
-                selected: features.preset == preset,
-                onSelected: canMutate
-                    ? (_) => _mutate('apply preset $preset', (s) async =>
-                        s.repository!.applyFeaturePreset(preset))
-                    : null,
-              ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        _switchRow(context, canMutate, 'RTSP', features.rtsp,
-            (v) => _mutate('set_features',
-                (s) async => s.repository!.setFeatures(rtsp: v))),
-        _switchRow(context, canMutate, 'Recording', features.recording, (v) =>
-            _mutate('set_features', (s) async =>
-                s.repository!.setFeatures(recording: v))),
-        _switchRow(context, canMutate, 'Overlay', features.overlay,
-            (v) => _mutate('set_features', (s) async =>
-                s.repository!.setFeatures(overlay: v))),
-        _switchRow(context, canMutate, 'UART', features.uartEnabled,
-            (v) => _mutate('set_uart', (s) async =>
-                s.repository!.setUart(v))),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            const SizedBox(width: 130, child: Text('record_every_n')),
-            SizedBox(
-              width: 90,
-              child: TextField(
-                controller: _recordEveryN,
-                enabled: canMutate,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: OutlineInputBorder(),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: busy ? null : _restart,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Restart worker'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: busy ? null : _confirmReboot,
+                  icon: const Icon(Icons.power_settings_new),
+                  label: const Text('Reboot board'),
+                ),
+              ],
+            ),
+            if (state.resources.needsReboot)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '板端报告需要重启',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
-            ),
           ],
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            FilledButton.icon(
-              onPressed: canMutate &&
-                      (worker?.stream.recording ?? false) == false
-                  ? () {
-                      final n = _recordEveryNValue;
-                      if (n == null || n < 1 || n > 120) {
-                        session.setStatus('record_every_n must be 1..120',
-                            error: true);
-                        return;
-                      }
-                      _mutate('start_recording', (s) async =>
-                          s.repository!.startRecording(recordEveryN: n));
-                    }
-                  : null,
-              icon: const Icon(Icons.fiber_manual_record),
-              label: const Text('Start recording'),
-            ),
-            OutlinedButton.icon(
-              onPressed: canMutate && (worker?.stream.recording ?? false)
-                  ? () => _mutate('stop_recording',
-                      (s) async => s.repository!.stopRecording())
-                  : null,
-              icon: const Icon(Icons.stop),
-              label: const Text('Stop'),
-            ),
-            OutlinedButton.icon(
-              onPressed: canMutate && (worker?.stream.recording ?? false)
-                  ? () => _mutate('rotate_recording', (s) async =>
-                      s.repository!.rotateRecording())
-                  : null,
-              icon: const Icon(Icons.swap_horiz),
-              label: const Text('Rotate file'),
-            ),
-          ],
-        ),
-        if (worker != null) ...[
-          const Divider(height: 16),
-          StatRow(
-              label: 'current file',
-              value: worker.stream.recordPath.isEmpty
-                  ? '-'
-                  : worker.stream.recordPath),
-          StatRow(
-              label: 'record fps / errors',
-              value:
-                  '${worker.stream.recordFps} / ${worker.stream.recordErrors}'),
-        ],
       ],
-    );
-  }
-
-  Widget _switchRow(BuildContext context, bool canMutate, String label,
-      bool value, ValueChanged<bool> onChanged) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 130,
-            child: Text(label, style: Theme.of(context).textTheme.bodySmall),
-          ),
-          Switch(value: value, onChanged: canMutate ? onChanged : null),
-          Expanded(
-            child: Text(
-              value ? 'on (restarts worker)' : 'off (restarts worker)',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _profilePicker(
-      {required bool canMutate, bool forReadout = false}) {
-    final session = widget.session;
-    final state = session.state!;
-    final current =
-        forReadout ? state.profile : (_selectedProfile ?? state.profile);
-    return DropdownButtonFormField<String>(
-      key: ValueKey(forReadout ? 'readout_profile' : 'start_profile'),
-      initialValue: _profiles.containsKey(current) ? current : null,
-      decoration: InputDecoration(
-        labelText: forReadout ? 'Readout profile' : 'Start profile',
-        border: const OutlineInputBorder(),
-        isDense: true,
-      ),
-      items: [
-        for (final entry in _profiles.entries)
-          DropdownMenuItem(
-            value: entry.key,
-            child: Text(
-              '${entry.key} '
-              '(${entry.value.expected?.sensor.join('x') ?? '?'} → '
-              '${entry.value.expected?.output.join('x') ?? '?'} '
-              '@${entry.value.expected?.fps.toStringAsFixed(0) ?? '?'})',
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-      ],
-      onChanged: canMutate ? (v) => setState(() => _selectedProfile = v) : null,
     );
   }
 
   Future<void> _confirmReboot() async {
-    if (!await _confirm('Reboot board',
-        'This reconnects the camera and interrupts streaming. Continue?',
-        'Continue')) {
-      return;
-    }
-    if (!await _confirm('Really reboot?',
-        'Final step — reboot the board now?', 'Reboot now')) {
-      return;
-    }
+    if (!await _confirm('重启开发板', '将中断识别和控制链，确定继续？', '继续')) return;
+    if (!await _confirm('再次确认', '现在立即重启开发板？', '立即重启')) return;
     try {
-      final schedule = await widget.session.mutate(
+      await widget.session.mutate(
         'reboot_board',
         (repo) => repo.rebootBoard(confirm: true),
       );
-      if (mounted) {
-        widget.session
-            .setStatus('Reboot scheduled: ${schedule['delay_s'] ?? '?'} s');
-      }
     } catch (_) {}
   }
 
   Future<bool> _confirm(String title, String message, String action) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+    return (await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(action),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(action),
-          ),
-        ],
-      ),
-    );
-    return confirmed ?? false;
+        )) ??
+        false;
   }
 }

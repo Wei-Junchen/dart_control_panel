@@ -18,7 +18,8 @@ class StatRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = valueColor ??
+    final color =
+        valueColor ??
         (highlight ? theme.colorScheme.error : theme.colorScheme.onSurface);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -76,8 +77,9 @@ class MetricCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       title,
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   ?trailing,

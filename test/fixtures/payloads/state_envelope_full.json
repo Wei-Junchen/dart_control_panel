@@ -15,12 +15,10 @@
     "daemon_uptime_s": 3600.5,
     "restarts": 1,
     "features": {
-      "preset": "debug",
-      "uart_enabled": true,
       "rtsp": true,
       "recording": false,
       "overlay": true,
-      "record_every_n": 1
+      "uart_enabled": true
     },
     "resources": {
       "vb_active": true,
@@ -61,26 +59,31 @@
         "y": 120,
         "pixels": 87,
         "area": 240,
-        "rect": [170, 110, 20, 24],
+        "rect": [
+          170,
+          110,
+          20,
+          24
+        ],
         "brightness": 73.0,
         "pitch_control": 0.01,
         "yaw_control": -0.02
       },
       "vision": {
-        "detector_mode": "nv21_score",
+        "detector_mode": "nv21_green",
         "green_score": {
           "y_min": 20,
           "g_min": 50,
           "score_min": 60,
           "rg_min": 20,
-          "gb_min": 20,
-          "coarse_stride": 4,
-          "refine_radius": 12
+          "gb_min": 20
         },
-        "lab": [20, 60, -128, -20, 0, 60],
-        "edge_x": 0,
-        "edge_y": 0,
-        "detect_roi": [40, 40, 280, 160],
+        "detect_roi": [
+          40,
+          40,
+          280,
+          160
+        ],
         "search_radius": 20,
         "area_threshold": 10,
         "pixels_threshold": 10,
@@ -91,17 +94,21 @@
         "jobs_dropped": 0,
         "detection_age_frames": 0,
         "profile_us": {
-          "coarse": 30,
           "threshold": 180,
           "blob": 280,
-          "coarse_samples": 3150,
           "fine_samples": 3000,
           "fine_passes": 200
         }
       },
       "camera": {
-        "output": [640, 360],
-        "sensor": [1280, 720],
+        "output": [
+          640,
+          360
+        ],
+        "sensor": [
+          1280,
+          720
+        ],
         "format": "NV21",
         "exposure_us": 1000,
         "gain": 1024,
@@ -120,22 +127,52 @@
           "average_luma": 7,
           "awb_auto": false,
           "wb_valid": true,
-          "wb_gain": [2095, 1024, 1024, 1974],
+          "wb_gain": [
+            2095,
+            1024,
+            1024,
+            1974
+          ],
           "color_temperature": 5432
-        }
+        },
+        "isp_adaptive_tone": false
       },
       "view": {
         "profile": "wide_640x360",
         "crop_enabled": false,
-        "crop": [0, 0, 1280, 720],
-        "pre_rotation_output": [640, 360],
+        "crop": [
+          0,
+          0,
+          1280,
+          720
+        ],
+        "pre_rotation_output": [
+          640,
+          360
+        ],
         "rotation": 0,
         "visible_offset_x": 0,
-        "output": [640, 360],
-        "scale": [0.5, 0.5],
+        "output": [
+          640,
+          360
+        ],
+        "scale": [
+          0.5,
+          0.5
+        ],
         "coordinate_space": "view"
       },
-      "overlay": {"enabled": true, "roi": true},
+      "overlay": {
+        "enabled": true,
+        "roi": true,
+        "frame_sync": true,
+        "sync_timeout_ms": 6,
+        "matched_frames": 8988,
+        "missed_frames": 2,
+        "last_wait_us": 410,
+        "max_wait_us": 6120,
+        "detection_frame_id": 9000
+      },
       "control": {
         "mode": "angle_rad",
         "fx": 277.0,
@@ -159,23 +196,83 @@
         "pitch": 0.0,
         "roll": 0.0,
         "yaw": 0.0,
-        "air_speed": 0.0
+        "air_speed": 0.0,
+        "decode_errors": 2,
+        "rx_layout": {
+          "packet_size": 123,
+          "header": 246,
+          "checksum": "sum8",
+          "checksum_offset": 122,
+          "byte_order": "little",
+          "fields": [
+            {
+              "name": "pitch",
+              "type": "float32",
+              "offset": 1
+            },
+            {
+              "name": "battery_mv",
+              "type": "uint16",
+              "offset": 17
+            }
+          ]
+        },
+        "values": {
+          "pitch": 1.25,
+          "battery_mv": 12000
+        }
       },
       "stream": {
         "rtsp_enabled": true,
         "rtsp_port": 8554,
-        "recording": false,
-        "record_path": "",
-        "record_every_n": 1,
-        "record_fps": 80,
         "source_frames": 9000,
         "input_frames": 8998,
         "rtsp_clients": 1,
         "encoded_frames": 8995,
-        "encoded_bytes": 10485760,
-        "record_errors": 0
+        "encoded_bytes": 10485760
       },
-      "debug": {"clients": 1, "accepted": 10, "commands": 3, "errors": 0}
+      "debug": {
+        "clients": 1,
+        "accepted": 10,
+        "commands": 3,
+        "errors": 0
+      },
+      "udp_telemetry": {
+        "enabled": true,
+        "running": true,
+        "host": "10.149.242.255",
+        "port": 1347,
+        "hz": 50,
+        "sequence": 9000,
+        "sent_packets": 9000,
+        "send_errors": 0,
+        "last_send_age_ms": 4
+      }
+    },
+    "operating_mode": "ground",
+    "mode": {
+      "name": "ground",
+      "ground": true,
+      "flight": false,
+      "rtsp": true,
+      "image_settings_locked": false
+    },
+    "udp_telemetry": {
+      "enabled": true,
+      "running": true,
+      "host": "10.149.242.255",
+      "port": 1347,
+      "hz": 50,
+      "sent_packets": 9000,
+      "send_errors": 0
+    },
+    "file_service": {
+      "enabled": true,
+      "port": 9002,
+      "fingerprint": "89abcdef01234567",
+      "read_only": true,
+      "range": true,
+      "available": true
     }
   }
 }

@@ -84,12 +84,17 @@ class DaemonClient {
 
     final Socket socket;
     try {
-      socket = await Socket.connect(host, port).timeout(timeout, onTimeout: () {
-        throw ProtocolTimeout('connect timeout to $host:$port');
-      });
+      socket = await Socket.connect(host, port).timeout(
+        timeout,
+        onTimeout: () {
+          throw ProtocolTimeout('connect timeout to $host:$port');
+        },
+      );
     } on SocketException catch (e) {
-      throw ProtocolTransportClosed('connect to $host:$port failed: ${e.message}',
-          cause: e);
+      throw ProtocolTransportClosed(
+        'connect to $host:$port failed: ${e.message}',
+        cause: e,
+      );
     } on TimeoutException catch (e) {
       throw ProtocolTimeout('connect to $host:$port timed out', cause: e);
     }
@@ -102,7 +107,10 @@ class DaemonClient {
     } on ProtocolException {
       rethrow;
     } on TimeoutException catch (e) {
-      throw ProtocolTimeout('no result from $host:$port within $timeout', cause: e);
+      throw ProtocolTimeout(
+        'no result from $host:$port within $timeout',
+        cause: e,
+      );
     } finally {
       socket.destroy();
       reader.dispose();
@@ -110,7 +118,10 @@ class DaemonClient {
   }
 
   Future<ResponseMessage> _awaitResult(
-      _LineReader reader, int id, String op) async {
+    _LineReader reader,
+    int id,
+    String op,
+  ) async {
     var acceptedSeen = false;
     while (true) {
       final event = await reader.next();
@@ -125,13 +136,15 @@ class DaemonClient {
           acceptedSeen = true;
           if (responseId != null && responseId != id) {
             throw ProtocolIdMismatch(
-                'accepted line has id $responseId, expected $id');
+              'accepted line has id $responseId, expected $id',
+            );
           }
           continue;
         case 'result':
           if (responseId != null && responseId != id) {
             throw ProtocolIdMismatch(
-                'result line has id $responseId, expected $id');
+              'result line has id $responseId, expected $id',
+            );
           }
           if (!acceptedSeen) {
             // Rare: daemon skipped accepted. The result line alone is still
@@ -142,10 +155,12 @@ class DaemonClient {
         case 'error':
           if (responseId != null && responseId != id) {
             throw ProtocolIdMismatch(
-                'error line has id $responseId, expected $id');
+              'error line has id $responseId, expected $id',
+            );
           }
           throw ProtocolException(
-              'daemon reported an error: ${obj['message'] ?? obj}');
+            'daemon reported an error: ${obj['message'] ?? obj}',
+          );
         default:
           throw ProtocolDecodeException('unexpected line type: $type');
       }
@@ -206,8 +221,11 @@ class _LineReader {
       (chunk) => decoder.addChunk(chunk),
       onDone: () {
         decoder.close();
-        _closePending(const ProtocolTransportClosed(
-            'connection closed before the result line arrived'));
+        _closePending(
+          const ProtocolTransportClosed(
+            'connection closed before the result line arrived',
+          ),
+        );
       },
       onError: (Object e, StackTrace st) {
         _closePending(ProtocolTransportClosed('socket error: $e', cause: e));

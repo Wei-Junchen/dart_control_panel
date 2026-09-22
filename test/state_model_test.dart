@@ -10,7 +10,9 @@ void main() {
   late Map<String, dynamic> fixtureEnvelope;
 
   setUpAll(() {
-    final raw = File('test/fixtures/payloads/state_envelope_full.json').readAsStringSync();
+    final raw = File(
+      'test/fixtures/payloads/state_envelope_full.json',
+    ).readAsStringSync();
     fixtureEnvelope = jsonDecode(raw) as Map<String, dynamic>;
   });
 
@@ -32,10 +34,8 @@ void main() {
       expect(state.daemonUptimeS, closeTo(3600.5, 0.001));
       expect(state.restarts, 1);
 
-      expect(state.features.preset, 'debug');
       expect(state.features.uartEnabled, isTrue);
       expect(state.features.overlay, isTrue);
-      expect(state.features.recordEveryN, 1);
 
       expect(state.resources.vbActive, isTrue);
       expect(state.resources.vbPoolCount, 7);
@@ -43,6 +43,11 @@ void main() {
       expect(state.resources.temperatureC, closeTo(51.2, 0.001));
       expect(state.resources.powerW, isNull);
       expect(state.resources.needsReboot, isFalse);
+      expect(state.fileService.enabled, isTrue);
+      expect(state.fileService.available, isTrue);
+      expect(state.fileService.readOnly, isTrue);
+      expect(state.fileService.range, isTrue);
+      expect(state.fileService.port, 9002);
     });
 
     test('parses worker performance, lifecycle and target', () {
@@ -72,17 +77,12 @@ void main() {
 
     test('parses vision with green_score details', () {
       final v = DaemonState.fromEnvelope(fixtureEnvelope).worker!.vision;
-      expect(v.detectorMode, 'nv21_score');
       expect(v.greenScore.yMin, 20);
       expect(v.greenScore.scoreMin, 60);
-      expect(v.greenScore.coarseStride, 4);
-      expect(v.greenScore.refineRadius, 12);
-      expect(v.lab, [20, 60, -128, -20, 0, 60]);
       expect(v.detectRoi, [40, 40, 280, 160]);
       expect(v.searchRadius, 20);
       expect(v.detectEveryN, 1);
       expect(v.detectionFrames, 8990);
-      expect(v.profileUs.coarse, 30);
       expect(v.profileUs.finePasses, 200);
     });
 
@@ -114,6 +114,13 @@ void main() {
 
       expect(w.overlay.enabled, isTrue);
       expect(w.overlay.roi, isTrue);
+      expect(w.overlay.frameSync, isTrue);
+      expect(w.overlay.syncTimeoutMs, 6);
+      expect(w.overlay.matchedFrames, 8988);
+      expect(w.overlay.missedFrames, 2);
+      expect(w.overlay.lastWaitUs, 410);
+      expect(w.overlay.maxWaitUs, 6120);
+      expect(w.overlay.detectionFrameId, 9000);
 
       expect(w.control.mode, 'angle_rad');
       expect(w.control.fx, closeTo(277.0, 0.001));
@@ -123,10 +130,13 @@ void main() {
       expect(w.uart.txPackets, 8990);
       expect(w.uart.txMinGapUs, 12400);
       expect(w.uart.telemetryValid, isFalse);
+      expect(w.uart.decodeErrors, 2);
+      expect(w.uart.rxLayout['packet_size'], 123);
+      expect(w.uart.values['pitch'], 1.25);
+      expect(w.uart.values['battery_mv'], 12000);
 
       expect(w.stream.rtspEnabled, isTrue);
       expect(w.stream.rtspPort, 8554);
-      expect(w.stream.recording, isFalse);
       expect(w.stream.sourceFrames, 9000);
       expect(w.stream.encodedBytes, 10485760);
 
@@ -137,20 +147,21 @@ void main() {
 
   group('forward compatibility', () {
     test('unknown top-level and nested fields are ignored', () {
-      final extra = jsonDecode(
-        File('test/fixtures/exchanges/get_state_extra_fields.ndjson')
-            .readAsStringSync()
-            .split('\n')[1],
-      ) as Map<String, dynamic>;
+      final extra =
+          jsonDecode(
+                File(
+                  'test/fixtures/exchanges/get_state_extra_fields.ndjson',
+                ).readAsStringSync().split('\n')[1],
+              )
+              as Map<String, dynamic>;
       final envelope = extra['payload'] as Map<String, dynamic>;
       final state = DaemonState.fromEnvelope(envelope);
       expect(state.state, 'STREAMING');
       expect(state.configRev, 185);
       expect(state.worker!.camera.isp.colorTemperature, 5432);
-      expect(
-        (state.envelope['payload'] as Map)['new_top_level_thing'],
-        {'a': [1, 2, 3]},
-      );
+      expect((state.envelope['payload'] as Map)['new_top_level_thing'], {
+        'a': [1, 2, 3],
+      });
     });
 
     test('missing sections yield defaults, never crash', () {
@@ -161,7 +172,6 @@ void main() {
       });
       expect(state.state, 'STOPPED');
       expect(state.profile, '');
-      expect(state.features.preset, '');
       expect(state.features.rtsp, isFalse);
       expect(state.resources.temperatureC, isNull);
       expect(state.worker, isNull);
@@ -193,7 +203,6 @@ void main() {
       expect(w.performance.fps, 0);
       expect(w.target.found, isFalse);
       expect(w.uart.open, isFalse);
-      expect(w.stream.recordEveryN, 1);
     });
   });
 
@@ -202,13 +211,15 @@ void main() {
       final p = Profile.fromJson({
         'readout': 'full_1280x720_80',
         'view': 'wide_640x360',
-        'features': 'debug',
         'status': 'stable',
-        'expected': {'sensor': [1280, 720], 'output': [640, 360], 'fps': 80},
+        'expected': {
+          'sensor': [1280, 720],
+          'output': [640, 360],
+          'fps': 80,
+        },
       });
       expect(p.readout, 'full_1280x720_80');
       expect(p.view, 'wide_640x360');
-      expect(p.features, 'debug');
       expect(p.status, 'stable');
       expect(p.expected!.sensor, [1280, 720]);
       expect(p.expected!.output, [640, 360]);
@@ -219,12 +230,10 @@ void main() {
       final p = Profile.fromJson({
         'readout': 'future_readout',
         'view': 'future_view',
-        'features': 'idle',
         'unknown_kind': 'thing',
       });
       expect(p.readout, 'future_readout');
       expect(p.view, 'future_view');
-      expect(p.features, 'idle');
       expect(p.status, '');
       expect(p.expected, isNull);
     });

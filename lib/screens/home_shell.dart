@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:dart_control_panel/controllers/board_session.dart';
 import 'package:dart_control_panel/controllers/state_poll_controller.dart';
+import 'package:dart_control_panel/controllers/telemetry_controller.dart';
 import 'package:dart_control_panel/models/board_address_store.dart';
 import 'package:dart_control_panel/screens/files_screen.dart';
 import 'package:dart_control_panel/screens/ground_test_screen.dart';
@@ -14,7 +15,10 @@ import 'package:dart_control_panel/widgets/connection_dock.dart';
 /// 新导航（4 项）：遥测 · 地面测试 · 模式 · 文件。
 /// 拥有唯一的板端连接（左下角 dock）：一次 Connect，全部页面共用。
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key});
+  const HomeShell({super.key, this.telemetryController});
+
+  /// Injectable for tests. Production owns one application-lifetime receiver.
+  final TelemetryController? telemetryController;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -23,9 +27,12 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   late final BoardSession _session = BoardSession();
+  late final TelemetryController _telemetry =
+      widget.telemetryController ?? TelemetryController();
+  late final bool _ownsTelemetry = widget.telemetryController == null;
   StatePollController? _poll;
   late final TextEditingController _hostController;
-  late final TextEditingController _portController;
+  static const int _controlPort = 9000;
 
   static const _destinations = <_Dest>[
     _Dest(label: 'Telemetry', icon: Icons.radar),
@@ -38,19 +45,17 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     final envHost = Platform.environment['DART_CTRL_HOST']?.trim();
-    final envPort = Platform.environment['DART_CTRL_PORT']?.trim();
-    _hostController =
-        TextEditingController(text: (envHost?.isNotEmpty ?? false) ? envHost! : '');
-    _portController =
-        TextEditingController(text: (envPort?.isNotEmpty ?? false) ? envPort! : '9000');
+    _hostController = TextEditingController(
+      text: (envHost?.isNotEmpty ?? false) ? envHost! : '',
+    );
     if (!(envHost?.isNotEmpty ?? false)) {
       final lastUsed = BoardAddressStore.instance.lastUsed;
       if (lastUsed != null) {
         _hostController.text = lastUsed.host;
-        _portController.text = '${lastUsed.port}';
       }
     }
     _session.addListener(_onSessionChanged);
+    _telemetry.start();
     if (envHost?.isNotEmpty ?? false) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _connect());
     }
@@ -61,8 +66,8 @@ class _HomeShellState extends State<HomeShell> {
     _session.removeListener(_onSessionChanged);
     _poll?.stop();
     _session.disconnect();
+    if (_ownsTelemetry) _telemetry.dispose();
     _hostController.dispose();
-    _portController.dispose();
     super.dispose();
   }
 
@@ -72,12 +77,11 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _connect() async {
     final host = _hostController.text.trim();
-    final port = int.tryParse(_portController.text.trim()) ?? 9000;
     if (host.isEmpty) {
       _session.setStatus('enter a board address first', error: true);
       return;
     }
-    _session.updateEndpoint(host, port);
+    _session.updateEndpoint(host, _controlPort);
     try {
       await _session.connect();
       _poll?.stop();
@@ -99,9 +103,8 @@ class _HomeShellState extends State<HomeShell> {
     await _session.disconnect();
   }
 
-  void _connectTo(String host, int port) {
+  void _connectTo(String host, int _) {
     _hostController.text = host;
-    _portController.text = '$port';
     _connect();
   }
 
@@ -117,16 +120,18 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _dock() {
-    return Align(
-      alignment: Alignment.bottomLeft,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        child: ConnectionDock(
-          session: _session,
-          hostController: _hostController,
-          portController: _portController,
-          onConnect: _connect,
-          onDisconnect: _disconnect,
+    return SafeArea(
+      top: false,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: ConnectionDock(
+            session: _session,
+            hostController: _hostController,
+            onConnect: _connect,
+            onDisconnect: _disconnect,
+          ),
         ),
       ),
     );
@@ -134,32 +139,37 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _buildWide(Widget page) {
     return Scaffold(
-      body: Stack(
+      body: Row(
         children: [
-          Row(
-            children: [
-              NavigationRail(
-                selectedIndex: _index,
-                onDestinationSelected: (i) => setState(() => _index = i),
-                labelType: NavigationRailLabelType.all,
-                leading: const SizedBox(
-                  height: 48,
-                  child: Center(child: Icon(Icons.track_changes)),
+          NavigationRail(
+            selectedIndex: _index,
+            onDestinationSelected: (i) => setState(() => _index = i),
+            labelType: NavigationRailLabelType.all,
+            leading: const SizedBox(
+              height: 48,
+              child: Center(child: Icon(Icons.track_changes)),
+            ),
+            destinations: [
+              for (final d in _destinations)
+                NavigationRailDestination(
+                  icon: Icon(d.icon),
+                  selectedIcon: Icon(d.icon),
+                  label: Text(d.label),
                 ),
-                destinations: [
-                  for (final d in _destinations)
-                    NavigationRailDestination(
-                      icon: Icon(d.icon),
-                      selectedIcon: Icon(d.icon),
-                      label: Text(d.label),
-                    ),
-                ],
-              ),
-              const VerticalDivider(thickness: 1, width: 1),
-              Expanded(child: page),
             ],
           ),
-          Positioned(left: 88, bottom: 12, child: _dock()),
+          const VerticalDivider(thickness: 1, width: 1),
+          Expanded(
+            child: Column(
+              children: [
+                Expanded(child: page),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+                  child: _dock(),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -167,10 +177,13 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _buildNarrow(Widget page) {
     return Scaffold(
-      body: Stack(
+      body: Column(
         children: [
-          page,
-          Positioned(left: 12, right: 12, bottom: 0, child: _dock()),
+          Expanded(child: page),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+            child: _dock(),
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -191,14 +204,49 @@ class _HomeShellState extends State<HomeShell> {
   Widget _pageFor(int index) {
     return switch (index) {
       0 => TelemetryScreen(
-          session: _session,
-          onConnectTo: _connectTo,
-        ),
+        controller: _telemetry,
+        session: _session,
+        onConnectTo: _connectTo,
+      ),
       1 => GroundTestScreen(session: _session),
       2 => ModeScreen(session: _session),
-      3 => FilesScreen(host: _session.host, key: ValueKey('files-${_session.host}')),
+      3 =>
+        !_session.connected || _session.state == null
+            ? const _ConnectionRequired(feature: 'Files')
+            : FilesScreen(
+                host: _session.host,
+                port: _session.state?.fileService.port ?? 9002,
+                key: ValueKey(
+                  'files-${_session.host}-'
+                  '${_session.state?.fileService.port ?? 9002}-'
+                  '${_session.state?.fileService.available ?? false}',
+                ),
+              ),
       _ => const SizedBox.shrink(),
     };
+  }
+}
+
+class _ConnectionRequired extends StatelessWidget {
+  const _ConnectionRequired({required this.feature});
+
+  final String feature;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(feature)),
+      body: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.link_off, size: 48),
+            SizedBox(height: 12),
+            Text('Connect to a board first'),
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -7,8 +7,9 @@ import 'package:dart_control_panel/models/daemon_state.dart';
 import 'package:dart_control_panel/models/runtime_draft.dart';
 
 DaemonState _fixtureState() {
-  final raw = File('test/fixtures/payloads/state_envelope_full.json')
-      .readAsStringSync();
+  final raw = File(
+    'test/fixtures/payloads/state_envelope_full.json',
+  ).readAsStringSync();
   return DaemonState.fromEnvelope(jsonDecode(raw) as Map<String, dynamic>);
 }
 
@@ -32,12 +33,11 @@ void main() {
       expect(draft.hasChanges, isFalse);
       expect(draft.valueOf(RuntimeDraft.exposureUs), 1000);
       expect(draft.valueOf(RuntimeDraft.again), 1024);
-      expect(draft.valueOf(RuntimeDraft.coarseStride), 4);
       expect(draft.valueOf(RuntimeDraft.detectRoi), '40,40,280,160');
       expect(draft.roiList, [40, 40, 280, 160]);
       expect(draft.roiMode, 'region');
-      expect(draft.labList, [20, 60, -128, -20, 0, 60]);
       expect(draft.valueOf(RuntimeDraft.controlMode), 'angle_rad');
+      expect(draft.valueOf(RuntimeDraft.overlaySyncTimeoutMs), 6);
     });
   });
 
@@ -81,22 +81,11 @@ void main() {
   });
 
   group('CSV composites', () {
-    test('setLabComponent rebuilds the CSV from effective values', () {
-      final draft = RuntimeDraft.fromState(_fixtureState());
-      draft.setLabComponent(0, 25);
-      expect(draft.labList, [25, 60, -128, -20, 0, 60]);
-      expect(draft.valueOf(RuntimeDraft.lab), '25,60,-128,-20,0,60');
-      // no spaces, as required by the protocol
-      expect(draft.valueOf(RuntimeDraft.lab), isNot(contains(' ')));
-    });
-
     test('ROI mode and rectangle are mutually exclusive', () {
       final draft = RuntimeDraft.fromState(_fixtureState());
-      draft.setRoiMode('off');
-      expect(draft.roiMode, 'off');
-      expect(draft.valueOf(RuntimeDraft.detectRoi), 'off');
-      draft.setRoiMode('LEGACY');
-      expect(draft.roiMode, 'legacy');
+      draft.setRoiMode('full');
+      expect(draft.roiMode, 'full');
+      expect(draft.valueOf(RuntimeDraft.detectRoi), 'full');
       draft.setRoiRect(10, 10, 100, 50);
       expect(draft.roiMode, 'region');
       expect(draft.roiList, [10, 10, 100, 50]);
@@ -105,38 +94,6 @@ void main() {
   });
 
   group('validation', () {
-    test('empty/garbage integer fields are rejected (historical Tk bug)', () {
-      final draft = RuntimeDraft.fromState(_fixtureState());
-      draft.edit(RuntimeDraft.coarseStride, ','); // old ""/"," bug
-      expect(draft.validate()[RuntimeDraft.coarseStride], contains('integer'));
-      draft.edit(RuntimeDraft.coarseStride, 0);
-      expect(draft.validate()[RuntimeDraft.coarseStride], isNotNull);
-      draft.edit(RuntimeDraft.coarseStride, 17);
-      expect(draft.validate()[RuntimeDraft.coarseStride], isNotNull);
-      draft.edit(RuntimeDraft.coarseStride, 4);
-      expect(draft.validate(), isEmpty);
-    });
-
-    test('lab components respect ranges and min<=max', () {
-      final draft = RuntimeDraft.fromState(_fixtureState());
-      draft.setLabComponent(1, 10); // l_max 10 < l_min 20
-      expect(draft.validate()[RuntimeDraft.lab], contains('l_min'));
-      draft.setLabComponent(1, 90); // valid
-      expect(draft.validate(), isEmpty);
-      draft.setLabComponent(2, 200); // a_min out of [-128,127]
-      expect(draft.validate()[RuntimeDraft.lab], contains('a_min'));
-    });
-
-    test('edge_x must satisfy 2*edge_x < output width', () {
-      final draft = RuntimeDraft.fromState(_fixtureState()); // output 640x360
-      draft.edit(RuntimeDraft.edgeX, 320);
-      expect(draft.validate()[RuntimeDraft.edgeX], contains('640'));
-      draft.edit(RuntimeDraft.edgeX, 319);
-      expect(draft.validate(), isEmpty);
-      draft.edit(RuntimeDraft.edgeX, -1);
-      expect(draft.validate()[RuntimeDraft.edgeX], isNotNull);
-    });
-
     test('search radius and thresholds bounded by output', () {
       final draft = RuntimeDraft.fromState(_fixtureState());
       draft.edit(RuntimeDraft.searchRadius, 0);
@@ -185,10 +142,18 @@ void main() {
       draft.edit(RuntimeDraft.rollUnit, 'foo');
       expect(draft.validate()[RuntimeDraft.rollUnit], isNotNull);
       draft.edit(RuntimeDraft.rollUnit, 'deg');
-      draft.edit(RuntimeDraft.detectorMode, 'foo');
-      expect(draft.validate()[RuntimeDraft.detectorMode], isNotNull);
-      draft.edit(RuntimeDraft.detectorMode, 'fast'); // backend alias
       expect(draft.validate(), isEmpty);
+    });
+
+    test('overlay frame sync timeout is bounded to 1..50 ms', () {
+      final draft = RuntimeDraft.fromState(_fixtureState());
+      draft.edit(RuntimeDraft.overlaySyncTimeoutMs, 0);
+      expect(draft.validate()[RuntimeDraft.overlaySyncTimeoutMs], isNotNull);
+      draft.edit(RuntimeDraft.overlaySyncTimeoutMs, 51);
+      expect(draft.validate()[RuntimeDraft.overlaySyncTimeoutMs], isNotNull);
+      draft.edit(RuntimeDraft.overlaySyncTimeoutMs, 8);
+      expect(draft.validate(), isEmpty);
+      expect(draft.toArgs(), {RuntimeDraft.overlaySyncTimeoutMs: 8});
     });
 
     test('float fields: fx/fy must be > 0', () {
@@ -204,8 +169,10 @@ void main() {
       draft.edit(RuntimeDraft.overlay, false);
       draft.edit(RuntimeDraft.again, 2048); // exposure 1000 > 0, valid
       expect(draft.validate(), isEmpty);
-      expect(draft.toArgs(),
-          {RuntimeDraft.overlay: false, RuntimeDraft.again: 2048});
+      expect(draft.toArgs(), {
+        RuntimeDraft.overlay: false,
+        RuntimeDraft.again: 2048,
+      });
     });
   });
 }

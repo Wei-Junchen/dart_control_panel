@@ -1,1 +1,7 @@
-{"v": 1, "type": "request", "id": 42, "op": "get_state", "args": {}}
+{
+  "v": 1,
+  "type": "request",
+  "id": 42,
+  "op": "get_state",
+  "args": {}
+}

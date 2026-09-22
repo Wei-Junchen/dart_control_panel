@@ -1,4 +1,5 @@
 import 'json_view.dart';
+import 'profile.dart';
 
 /// Parsed daemon state (`result.payload.payload` after unwrapping the state
 /// envelope in [DaemonState.fromEnvelope]).
@@ -7,7 +8,7 @@ import 'json_view.dart';
 /// sections default to empty/null rather than failing.
 class DaemonState {
   DaemonState.fromEnvelope(Map<String, dynamic> envelope)
-      : envelope = Map.unmodifiable(envelope) {
+    : envelope = Map.unmodifiable(envelope) {
     final v = JsonView(envelope);
     this.v = v.int_('v', 0);
     type = v.str('type');
@@ -20,17 +21,36 @@ class DaemonState {
     state = p.str('state');
     profile = p.str('profile');
     pendingProfile = p.strOrNull('pending_profile');
-    mode = p.str('mode', 'ground');
+    final modeValue = p['mode'];
+    final modeView = modeValue is Map
+        ? JsonView(Map<String, dynamic>.from(modeValue))
+        : const JsonView(null);
+    mode =
+        p.strOrNull('operating_mode') ??
+        modeView.strOrNull('name') ??
+        (modeValue is String ? modeValue : 'ground');
+    imageSettingsLocked = modeView.flag(
+      'image_settings_locked',
+      mode == 'flight',
+    );
     modePending = p.strOrNull('mode_pending');
     modeTransition = p.flag('mode_transition');
     rotation = p.int_('rotation');
     configRev = p.int_('config_rev');
     lastKnownGood = p.str('last_known_good');
     lastError = p.str('last_error');
+    configWarning = p.str('config_warning');
+    configPath = p.str('config_path');
+    expected = p.nested('expected') == null
+        ? null
+        : Expected.fromJson(Map<String, dynamic>.from(p['expected'] as Map));
     workerPid = p.int_('worker_pid');
     daemonUptimeS = p.num_('daemon_uptime_s')?.toDouble();
     restarts = p.int_('restarts');
     features = Features.fromJson(p.nested('features'));
+    flight = FlightState.fromJson(p.nested('flight'));
+    udpTelemetry = DaemonUdpTelemetry.fromJson(p.nested('udp_telemetry'));
+    fileService = FileServiceState.fromJson(p.nested('file_service'));
     resources = Resources.fromJson(p.nested('resources'));
     final workerView = p.nested('worker');
     worker = workerView == null ? null : WorkerState.fromJson(workerView);
@@ -48,20 +68,26 @@ class DaemonState {
   late final String profile;
   late final String? pendingProfile;
 
-  /// update.md proposal: "ground" | "flight"; '' when the board has not
-  /// implemented set_mode yet (forward-compatible default).
+  /// Current operating mode: `ground` or `flight`.
   late final String mode;
+  late final bool imageSettingsLocked;
   late final String? modePending;
   late final bool modeTransition;
   late final int rotation;
   late final int configRev;
   late final String lastKnownGood;
   late final String lastError;
+  late final String configWarning;
+  late final String configPath;
+  late final Expected? expected;
   late final int workerPid;
   late final double? daemonUptimeS;
   late final int restarts;
 
   late final Features features;
+  late final FlightState flight;
+  late final DaemonUdpTelemetry udpTelemetry;
+  late final FileServiceState fileService;
   late final Resources resources;
   late final WorkerState? worker;
 
@@ -70,8 +96,47 @@ class DaemonState {
 
   bool get isTransitional => isTransitionalState(state);
 
-  static bool isTransitionalState(String state) =>
-      const {'STARTING', 'STANDBY_PENDING', 'WAKING', 'STOPPING'}.contains(state);
+  static bool isTransitionalState(String state) => const {
+    'STARTING',
+    'STANDBY_PENDING',
+    'WAKING',
+    'STOPPING',
+    'FLIGHT_STARTING',
+    'FLIGHT_STOPPING',
+  }.contains(state);
+}
+
+class FlightState {
+  const FlightState(this._v);
+  factory FlightState.fromJson(JsonView? v) =>
+      v == null ? const FlightState(null) : FlightState(v);
+
+  final JsonView? _v;
+
+  bool get active => _v?.flag('active') ?? false;
+  String get state => _v?.str('state') ?? 'IDLE';
+  String get triggerSource => _v?.str('trigger_source') ?? '';
+  String get telemetryHost => _v?.str('telemetry_host') ?? '';
+  int get startedMonoUs => _v?.int_('started_mono_us') ?? 0;
+  String get recordPath => _v?.str('record_path') ?? '';
+  String get telemetryPath => _v?.str('telemetry_path') ?? '';
+  String get lastRecordPath => _v?.str('last_record_path') ?? '';
+  String get lastTelemetryPath => _v?.str('last_telemetry_path') ?? '';
+}
+
+class FileServiceState {
+  const FileServiceState(this._v);
+  factory FileServiceState.fromJson(JsonView? v) =>
+      v == null ? const FileServiceState(null) : FileServiceState(v);
+
+  final JsonView? _v;
+
+  bool get enabled => _v?.flag('enabled') ?? false;
+  bool get available => _v?.flag('available') ?? false;
+  bool get readOnly => _v?.flag('read_only') ?? true;
+  bool get range => _v?.flag('range') ?? false;
+  int get port => _v?.int_('port', 9002) ?? 9002;
+  String get fingerprint => _v?.str('fingerprint') ?? '';
 }
 
 class Features {
@@ -81,12 +146,27 @@ class Features {
 
   final JsonView? _v;
 
-  String get preset => _v?.str('preset') ?? '';
   bool get uartEnabled => _v?.flag('uart_enabled') ?? false;
   bool get rtsp => _v?.flag('rtsp') ?? false;
-  bool get recording => _v?.flag('recording') ?? false;
   bool get overlay => _v?.flag('overlay') ?? false;
-  int get recordEveryN => _v?.int_('record_every_n', 1) ?? 1;
+  bool get recording => _v?.flag('recording') ?? false;
+}
+
+class DaemonUdpTelemetry {
+  const DaemonUdpTelemetry(this._v);
+  factory DaemonUdpTelemetry.fromJson(JsonView? v) =>
+      v == null ? const DaemonUdpTelemetry(null) : DaemonUdpTelemetry(v);
+
+  final JsonView? _v;
+
+  bool get enabled => _v?.flag('enabled') ?? false;
+  bool get running => _v?.flag('running') ?? false;
+  bool get active => _v?.flag('active', running) ?? false;
+  String get host => _v?.str('host') ?? '';
+  int get port => _v?.int_('port', 1347) ?? 1347;
+  int get hz => _v?.int_('hz') ?? 0;
+  int get sentPackets => _v?.int_('sent_packets') ?? 0;
+  int get sendErrors => _v?.int_('send_errors') ?? 0;
 }
 
 class Resources {
@@ -121,6 +201,7 @@ class WorkerState {
     control = ControlState.fromJson(_v.nested('control'));
     uart = UartState.fromJson(_v.nested('uart'));
     stream = StreamState.fromJson(_v.nested('stream'));
+    udpTelemetry = WorkerUdpTelemetry.fromJson(_v.nested('udp_telemetry'));
     debug = DebugState.fromJson(_v.nested('debug'));
   }
 
@@ -139,6 +220,7 @@ class WorkerState {
   late final ControlState control;
   late final UartState uart;
   late final StreamState stream;
+  late final WorkerUdpTelemetry udpTelemetry;
   late final DebugState debug;
 }
 
@@ -206,8 +288,6 @@ class GreenScore {
   int get scoreMin => _v?.int_('score_min') ?? 0;
   int get rgMin => _v?.int_('rg_min') ?? 0;
   int get gbMin => _v?.int_('gb_min') ?? 0;
-  int get coarseStride => _v?.int_('coarse_stride') ?? 0;
-  int get refineRadius => _v?.int_('refine_radius') ?? 0;
 }
 
 class VisionProfileUs {
@@ -217,10 +297,8 @@ class VisionProfileUs {
 
   final JsonView? _v;
 
-  int get coarse => _v?.int_('coarse') ?? 0;
   int get threshold => _v?.int_('threshold') ?? 0;
   int get blob => _v?.int_('blob') ?? 0;
-  int get coarseSamples => _v?.int_('coarse_samples') ?? 0;
   int get fineSamples => _v?.int_('fine_samples') ?? 0;
   int get finePasses => _v?.int_('fine_passes') ?? 0;
 }
@@ -232,11 +310,7 @@ class Vision {
 
   final JsonView? _v;
 
-  String get detectorMode => _v?.str('detector_mode') ?? '';
   GreenScore get greenScore => GreenScore.fromJson(_v?.nested('green_score'));
-  List<int> get lab => _v?.intList('lab') ?? const [];
-  int get edgeX => _v?.int_('edge_x') ?? 0;
-  int get edgeY => _v?.int_('edge_y') ?? 0;
   List<int> get detectRoi => _v?.intList('detect_roi') ?? const [];
   int get searchRadius => _v?.int_('search_radius') ?? 0;
   int get areaThreshold => _v?.int_('area_threshold') ?? 0;
@@ -287,8 +361,28 @@ class Camera {
   int get dgain => _v?.int_('dgain') ?? 0;
   int get ispDgain => _v?.int_('isp_dgain') ?? 0;
   bool get awbAuto => _v?.flag('awb_auto') ?? false;
+  bool get ispAdaptiveTone => _v?.flag('isp_adaptive_tone') ?? true;
   bool get streaming => _v?.flag('streaming') ?? false;
   CameraIsp get isp => CameraIsp.fromJson(_v?.nested('isp'));
+}
+
+class WorkerUdpTelemetry {
+  const WorkerUdpTelemetry(this._v);
+  factory WorkerUdpTelemetry.fromJson(JsonView? v) =>
+      v == null ? const WorkerUdpTelemetry(null) : WorkerUdpTelemetry(v);
+
+  final JsonView? _v;
+
+  bool get enabled => _v?.flag('enabled') ?? false;
+  bool get running => _v?.flag('running') ?? false;
+  bool get active => _v?.flag('active', running) ?? false;
+  String get host => _v?.str('host') ?? '';
+  int get port => _v?.int_('port', 1347) ?? 1347;
+  int get hz => _v?.int_('hz') ?? 0;
+  int get sequence => _v?.int_('sequence') ?? 0;
+  int get sentPackets => _v?.int_('sent_packets') ?? 0;
+  int get sendErrors => _v?.int_('send_errors') ?? 0;
+  int get lastSendAgeMs => _v?.int_('last_send_age_ms') ?? -1;
 }
 
 class ViewState {
@@ -301,7 +395,8 @@ class ViewState {
   String get profile => _v?.str('profile') ?? '';
   bool get cropEnabled => _v?.flag('crop_enabled') ?? false;
   List<int> get crop => _v?.intList('crop') ?? const [];
-  List<int> get preRotationOutput => _v?.intList('pre_rotation_output') ?? const [];
+  List<int> get preRotationOutput =>
+      _v?.intList('pre_rotation_output') ?? const [];
   int get rotation => _v?.int_('rotation') ?? 0;
   int get visibleOffsetX => _v?.int_('visible_offset_x') ?? 0;
   List<int> get output => _v?.intList('output') ?? const [];
@@ -318,6 +413,13 @@ class OverlayState {
 
   bool get enabled => _v?.flag('enabled') ?? false;
   bool get roi => _v?.flag('roi') ?? false;
+  bool get frameSync => _v?.flag('frame_sync') ?? false;
+  int get syncTimeoutMs => _v?.int_('sync_timeout_ms', 6) ?? 6;
+  int get matchedFrames => _v?.int_('matched_frames') ?? 0;
+  int get missedFrames => _v?.int_('missed_frames') ?? 0;
+  int get lastWaitUs => _v?.int_('last_wait_us') ?? 0;
+  int get maxWaitUs => _v?.int_('max_wait_us') ?? 0;
+  int get detectionFrameId => _v?.int_('detection_frame_id') ?? 0;
 }
 
 class ControlState {
@@ -346,6 +448,7 @@ class UartState {
   int get rxBytes => _v?.int_('rx_bytes') ?? 0;
   int get rxPackets => _v?.int_('rx_packets') ?? 0;
   int get crcErrors => _v?.int_('crc_errors') ?? 0;
+  int get decodeErrors => _v?.int_('decode_errors') ?? 0;
   int get alignDrops => _v?.int_('align_drops') ?? 0;
   int get txPackets => _v?.int_('tx_packets') ?? 0;
   int get txErrors => _v?.int_('tx_errors') ?? 0;
@@ -357,6 +460,14 @@ class UartState {
   double get roll => _v?.dbl('roll') ?? 0;
   double get yaw => _v?.dbl('yaw') ?? 0;
   double get airSpeed => _v?.dbl('air_speed') ?? 0;
+  Map<String, dynamic> get rxLayout => _v?.raw('rx_layout') ?? const {};
+  Map<String, double> get values {
+    final raw = _v?.raw('values') ?? const {};
+    return {
+      for (final entry in raw.entries)
+        if (entry.value is num) entry.key: (entry.value as num).toDouble(),
+    };
+  }
 }
 
 class StreamState {
@@ -368,16 +479,11 @@ class StreamState {
 
   bool get rtspEnabled => _v?.flag('rtsp_enabled') ?? false;
   int get rtspPort => _v?.int_('rtsp_port', 8554) ?? 8554;
-  bool get recording => _v?.flag('recording') ?? false;
-  String get recordPath => _v?.str('record_path') ?? '';
-  int get recordEveryN => _v?.int_('record_every_n', 1) ?? 1;
-  int get recordFps => _v?.int_('record_fps') ?? 0;
   int get sourceFrames => _v?.int_('source_frames') ?? 0;
   int get inputFrames => _v?.int_('input_frames') ?? 0;
   int get rtspClients => _v?.int_('rtsp_clients') ?? 0;
   int get encodedFrames => _v?.int_('encoded_frames') ?? 0;
   int get encodedBytes => _v?.int_('encoded_bytes') ?? 0;
-  int get recordErrors => _v?.int_('record_errors') ?? 0;
 }
 
 class DebugState {

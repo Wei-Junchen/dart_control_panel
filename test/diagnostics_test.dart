@@ -8,8 +8,9 @@ import 'package:dart_control_panel/models/daemon_state.dart';
 import 'package:dart_control_panel/models/diagnostics_summary.dart';
 
 DaemonState _fixtureState() {
-  final raw = File('test/fixtures/payloads/state_envelope_full.json')
-      .readAsStringSync();
+  final raw = File(
+    'test/fixtures/payloads/state_envelope_full.json',
+  ).readAsStringSync();
   return DaemonState.fromEnvelope(jsonDecode(raw) as Map<String, dynamic>);
 }
 
@@ -85,7 +86,10 @@ void main() {
         board: '10.149.242.1:9000',
         appVersion: '0.1.0',
       );
-      expect(summary, contains('=== Dart Guidance control panel diagnostics ==='));
+      expect(
+        summary,
+        contains('=== Dart Guidance control panel diagnostics ==='),
+      );
       expect(summary, contains('board=10.149.242.1:9000'));
       expect(summary, contains('app_version=0.1.0'));
       expect(summary, contains('STREAMING'));
@@ -101,10 +105,12 @@ void main() {
     });
 
     test('works with a minimal/empty state (no worker)', () {
-      final summary = buildDiagnosticsSummary(DaemonState.fromEnvelope({
-        'v': 1,
-        'payload': {'state': 'STOPPED'},
-      }));
+      final summary = buildDiagnosticsSummary(
+        DaemonState.fromEnvelope({
+          'v': 1,
+          'payload': {'state': 'STOPPED'},
+        }),
+      );
       expect(summary, contains('daemon: STOPPED'));
       // no worker section, no crash
       expect(summary, isNot(contains('worker: frames=')));

@@ -33,7 +33,8 @@ void main() {
   group('BoardSession', () {
     test('connect probes once and stores state', () async {
       final daemon = await FixtureDaemon.start(
-          (op) async => fixtures['get_state_ok']!);
+        (op) async => fixtures['get_state_ok']!,
+      );
       final session = BoardSession(host: '127.0.0.1', port: daemon.port);
       await session.connect();
       expect(session.connected, isTrue);
@@ -44,7 +45,8 @@ void main() {
 
     test('successful mutation sets status and refreshes state', () async {
       final daemon = await FixtureDaemon.start(
-          (op) async => fixtures['get_state_ok']!);
+        (op) async => fixtures['get_state_ok']!,
+      );
       final session = BoardSession(host: '127.0.0.1', port: daemon.port);
       await session.connect();
       final before = daemon.requests.length;
@@ -66,34 +68,40 @@ void main() {
       await daemon.stop();
     });
 
-    test('rejected mutation surfaces daemon error and refreshes real state',
-        () async {
-      final daemon = await FixtureDaemon.start((op) async {
-        if (op == 'apply_readout_profile') return fixtures['lifecycle_rejected']!;
-        return fixtures['get_state_ok']!;
-      });
-      final session = BoardSession(host: '127.0.0.1', port: daemon.port);
-      await session.connect();
+    test(
+      'rejected mutation surfaces daemon error and refreshes real state',
+      () async {
+        final daemon = await FixtureDaemon.start((op) async {
+          if (op == 'apply_readout_profile')
+            return fixtures['lifecycle_rejected']!;
+          return fixtures['get_state_ok']!;
+        });
+        final session = BoardSession(host: '127.0.0.1', port: daemon.port);
+        await session.connect();
 
-      expect(
-        () => session.mutate('apply_readout_profile',
-            (repo) => repo.applyReadoutProfile('full_square_360')),
-        throwsA(isA<OperationFailedException>()),
-      );
-      await _waitLoop();
+        expect(
+          () => session.mutate(
+            'apply_readout_profile',
+            (repo) => repo.applyReadoutProfile('full_square_360'),
+          ),
+          throwsA(isA<OperationFailedException>()),
+        );
+        await _waitLoop();
 
-      // rollback result shown to the user, and a get_state refresh followed
-      expect(session.statusMessage, contains('rolled back'));
-      expect(session.statusError, isTrue);
-      expect(session.state, isNotNull);
+        // rollback result shown to the user, and a get_state refresh followed
+        expect(session.statusMessage, contains('rolled back'));
+        expect(session.statusError, isTrue);
+        expect(session.state, isNotNull);
 
-      await session.disconnect();
-      await daemon.stop();
-    });
+        await session.disconnect();
+        await daemon.stop();
+      },
+    );
 
     test('mutations queue: two rapid ops run in order', () async {
       final daemon = await FixtureDaemon.start(
-          (op) async => fixtures['get_state_ok']!);
+        (op) async => fixtures['get_state_ok']!,
+      );
       final session = BoardSession(host: '127.0.0.1', port: daemon.port);
       await session.connect();
       final seen = <String>[];
@@ -115,7 +123,8 @@ void main() {
 
     test('disconnect clears state and queue', () async {
       final daemon = await FixtureDaemon.start(
-          (op) async => fixtures['get_state_ok']!);
+        (op) async => fixtures['get_state_ok']!,
+      );
       final session = BoardSession(host: '127.0.0.1', port: daemon.port);
       await session.connect();
       await session.disconnect();

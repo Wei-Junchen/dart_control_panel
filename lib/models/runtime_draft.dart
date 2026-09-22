@@ -8,10 +8,8 @@ import 'daemon_state.dart';
 /// - the draft is never overwritten by the 500 ms state poll — the form only
 ///   syncs on first load, "reload from board", or a successful apply;
 /// - only changed fields are serialized (`toArgs`), empty/unset values are
-///   never sent, and no malformed packets (e.g. empty `coarse_stride`) can be
-///   produced;
-/// - CSV composite fields (`lab`, `detect_roi`) are stored as no-space CSV
-///   strings but edited component-by-component;
+///   never sent and no malformed numeric values can be produced;
+/// - ROI is stored as a no-space CSV string;
 /// - all integers are range-checked before apply.
 class RuntimeDraft extends ChangeNotifier {
   /// Builds a clean draft from a freshly fetched [DaemonState].
@@ -25,24 +23,12 @@ class RuntimeDraft extends ChangeNotifier {
   RuntimeDraft();
 
   /// Protocol-level field names (AGENTS.md §5.1).
-  static const detectorMode = 'detector_mode';
-  static const lab = 'lab';
-  static const lMin = 'l_min';
-  static const lMax = 'l_max';
-  static const aMin = 'a_min';
-  static const aMax = 'a_max';
-  static const bMin = 'b_min';
-  static const bMax = 'b_max';
   static const greenYMin = 'green_y_min';
   static const greenGMin = 'green_g_min';
   static const greenScoreMin = 'green_score_min';
   static const greenRgMin = 'green_rg_min';
   static const greenGbMin = 'green_gb_min';
-  static const coarseStride = 'coarse_stride';
-  static const refineRadius = 'refine_radius';
   static const detectRoi = 'detect_roi';
-  static const edgeX = 'edge_x';
-  static const edgeY = 'edge_y';
   static const searchRadius = 'search_radius';
   static const areaThreshold = 'area_threshold';
   static const pixelsThreshold = 'pixels_threshold';
@@ -54,8 +40,10 @@ class RuntimeDraft extends ChangeNotifier {
   static const dgain = 'dgain';
   static const ispDgain = 'isp_dgain';
   static const awbAuto = 'awb_auto';
+  static const ispAdaptiveTone = 'isp_adaptive_tone';
   static const overlay = 'overlay';
   static const overlayRoi = 'overlay_roi';
+  static const overlaySyncTimeoutMs = 'overlay_sync_timeout_ms';
   static const controlMode = 'control_mode';
   static const fx = 'fx';
   static const fy = 'fy';
@@ -125,29 +113,9 @@ class RuntimeDraft extends ChangeNotifier {
 
   // --- composite helpers ---------------------------------------------------
 
-  /// Effective 6-element lab list (defaults to zeros when unavailable).
-  List<int> get labList {
-    final raw = valueOf(lab);
-    if (raw is String) {
-      final parts = raw.split(',');
-      if (parts.length == 6) {
-        return [for (final p in parts) int.tryParse(p) ?? 0];
-      }
-    }
-    return List.filled(6, 0);
-  }
+  static const _roiOffValues = {'full', 'off', 'none'};
 
-  /// Sets one of the six lab components, keeping the rest from the effective
-  /// value, and stores the whole CSV string.
-  void setLabComponent(int index, int? value) {
-    final current = List<int>.of(labList);
-    if (value != null) current[index] = value;
-    edit(lab, current.join(','));
-  }
-
-  static const _roiOffValues = {'off', 'none', 'legacy'};
-
-  /// 'region' when a rectangle is set, otherwise off/none/legacy mode.
+  /// 'region' when a rectangle is set, otherwise full-frame mode.
   String get roiMode {
     final raw = valueOf(detectRoi);
     if (raw is String && _roiOffValues.contains(raw.toLowerCase())) {
@@ -168,7 +136,7 @@ class RuntimeDraft extends ChangeNotifier {
     return List.filled(4, 0);
   }
 
-  /// Disables/legacy ROI via 'off' | 'none' | 'legacy'.
+  /// Selects full-frame acquisition via 'full' (off/none remain aliases).
   void setRoiMode(String mode) {
     if (_roiOffValues.contains(mode.toLowerCase())) {
       edit(detectRoi, mode.toLowerCase());
@@ -192,7 +160,7 @@ class RuntimeDraft extends ChangeNotifier {
     void checkRange(String field, int min, int max) {
       final value = _values[field];
       if (value is String) {
-        // Guard against the historical Tk bug (e.g. coarse_stride:",").
+        // Guard against malformed text reaching an integer field.
         errors[field] = '$field must be an integer, got "$value"';
         return;
       }
@@ -203,47 +171,13 @@ class RuntimeDraft extends ChangeNotifier {
       }
     }
 
-    // lab component cross-field min<=max
-    if (_values.containsKey(lab)) {
-      final components = {
-        lMin: const [0, 100],
-        lMax: const [0, 100],
-        aMin: const [-128, 127],
-        aMax: const [-128, 127],
-        bMin: const [-128, 127],
-        bMax: const [-128, 127],
-      };
-      final effective = labList;
-      final keys = [lMin, lMax, aMin, aMax, bMin, bMax];
-      for (var i = 0; i < 6; i++) {
-        final (min, max) = (components[keys[i]]![0], components[keys[i]]![1]);
-        if (effective[i] < min || effective[i] > max) {
-          errors['lab'] = '${keys[i]} must be in [$min, $max], got ${effective[i]}';
-        }
-      }
-      if (effective[0] > effective[1]) {
-        errors[lab] = 'l_min must be <= l_max';
-      }
-      if (effective[2] > effective[3]) {
-        errors[lab] = 'a_min must be <= a_max';
-      }
-      if (effective[4] > effective[5]) {
-        errors[lab] = 'b_min must be <= b_max';
-      }
-    }
-
-    for (final f in [
-      greenYMin, greenGMin,
-    ]) {
+    for (final f in [greenYMin, greenGMin]) {
       checkRange(f, 0, 255);
     }
     checkRange(greenScoreMin, -510, 510);
     for (final f in [greenRgMin, greenGbMin]) {
       checkRange(f, -255, 255);
     }
-    checkRange(coarseStride, 1, 16);
-    checkRange(refineRadius, 1, 256);
-
     if (_values.containsKey(detectRoi)) {
       if (roiMode == 'region') {
         final r = roiList;
@@ -254,25 +188,6 @@ class RuntimeDraft extends ChangeNotifier {
           errors[detectRoi] =
               'detect_roi ($x,$y $w x $h) exceeds output ${outW}x$outH';
         }
-      } else if (roiMode == 'legacy' && _output.isEmpty) {
-        errors[detectRoi] = 'legacy ROI requires a loaded view output';
-      }
-    }
-
-    if (_values.containsKey(edgeX)) {
-      final raw = _values[edgeX];
-      if (raw is! num) {
-        errors[edgeX] = 'edge_x must be an integer';
-      } else if (raw < 0 || (outW > 0 && raw * 2 >= outW)) {
-        errors[edgeX] = 'edge_x must be >= 0 and 2*edge_x < $outW';
-      }
-    }
-    if (_values.containsKey(edgeY)) {
-      final raw = _values[edgeY];
-      if (raw is! num) {
-        errors[edgeY] = 'edge_y must be an integer';
-      } else if (raw < 0 || (outH > 0 && raw >= outH)) {
-        errors[edgeY] = 'edge_y must be >= 0 and < $outH';
       }
     }
     if (_values.containsKey(searchRadius)) {
@@ -298,6 +213,7 @@ class RuntimeDraft extends ChangeNotifier {
       checkRange(f, 1, 8);
     }
     checkRange(detectEveryN, 1, 120);
+    checkRange(overlaySyncTimeoutMs, 1, 50);
 
     if (_values.containsKey(exposureUs)) {
       final raw = _values[exposureUs];
@@ -309,9 +225,7 @@ class RuntimeDraft extends ChangeNotifier {
     }
 
     // manual gains require exposure > 0 (current or in the same packet)
-    final gainDirty = [
-      again, dgain, ispDgain,
-    ].any(_values.containsKey);
+    final gainDirty = [again, dgain, ispDgain].any(_values.containsKey);
     if (gainDirty) {
       final exposure = valueOf(exposureUs);
       final exposurePositive = exposure is num && exposure > 0;
@@ -357,7 +271,9 @@ class RuntimeDraft extends ChangeNotifier {
     }
     if (_values.containsKey(rollUnit)) {
       final v = _values[rollUnit];
-      if (v != 'deg' && v != 'rad') errors[rollUnit] = 'roll_unit must be deg or rad';
+      if (v != 'deg' && v != 'rad') {
+        errors[rollUnit] = 'roll_unit must be deg or rad';
+      }
     }
     if (_values.containsKey(controlMode)) {
       final v = _values[controlMode];
@@ -365,13 +281,6 @@ class RuntimeDraft extends ChangeNotifier {
         errors[controlMode] = 'control_mode must be pixel or angle_rad';
       }
     }
-    if (_values.containsKey(detectorMode)) {
-      final v = _values[detectorMode];
-      if (v != 'lab' && v != 'nv21_score' && v != 'fast') {
-        errors[detectorMode] = 'detector_mode must be lab, nv21_score or fast';
-      }
-    }
-
     return errors;
   }
 
@@ -385,18 +294,12 @@ class RuntimeDraft extends ChangeNotifier {
     final ov = w.overlay;
     final gs = v.greenScore;
     return <String, dynamic>{
-      detectorMode: v.detectorMode,
-      if (v.lab.length == 6) lab: v.lab.join(','),
       greenYMin: gs.yMin,
       greenGMin: gs.gMin,
       greenScoreMin: gs.scoreMin,
       greenRgMin: gs.rgMin,
       greenGbMin: gs.gbMin,
-      coarseStride: gs.coarseStride,
-      refineRadius: gs.refineRadius,
       if (v.detectRoi.length == 4) detectRoi: v.detectRoi.join(','),
-      edgeX: v.edgeX,
-      edgeY: v.edgeY,
       searchRadius: v.searchRadius,
       areaThreshold: v.areaThreshold,
       pixelsThreshold: v.pixelsThreshold,
@@ -408,8 +311,10 @@ class RuntimeDraft extends ChangeNotifier {
       dgain: c.dgain,
       ispDgain: c.ispDgain,
       awbAuto: c.awbAuto,
+      ispAdaptiveTone: c.ispAdaptiveTone,
       overlay: ov.enabled,
       overlayRoi: ov.roi,
+      overlaySyncTimeoutMs: ov.syncTimeoutMs,
       controlMode: ctrl.mode,
       fx: ctrl.fx,
       fy: ctrl.fy,

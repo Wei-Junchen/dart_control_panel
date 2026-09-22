@@ -10,9 +10,14 @@ class DartControlPanelApp extends StatelessWidget {
     return MaterialApp(
       title: 'Dart Guidance Control Panel',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: Colors.teal, brightness: Brightness.light),
-      darkTheme:
-          ThemeData(colorSchemeSeed: Colors.teal, brightness: Brightness.dark),
+      theme: ThemeData(
+        colorSchemeSeed: Colors.teal,
+        brightness: Brightness.light,
+      ),
+      darkTheme: ThemeData(
+        colorSchemeSeed: Colors.teal,
+        brightness: Brightness.dark,
+      ),
       themeMode: ThemeMode.system,
       home: const HomeShell(),
     );

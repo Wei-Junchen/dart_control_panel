@@ -113,8 +113,9 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     );
     if (location == null) return; // user cancelled
     try {
-      await File(location.path)
-          .writeAsString(JsonEncoder.withIndent('  ').convert(state.envelope));
+      await File(
+        location.path,
+      ).writeAsString(JsonEncoder.withIndent('  ').convert(state.envelope));
       _session.setStatus('State exported to ${location.path}');
     } catch (e) {
       _session.setStatus('export failed: $e', error: true);
@@ -224,8 +225,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               else if (_schema == null)
                 const Text('Not loaded yet.')
               else
-                _mono(jsonEncode(_schema!),
-                    maxHeight: 220, collapsed: true),
+                _mono(jsonEncode(_schema!), maxHeight: 220, collapsed: true),
             ],
           ),
           const SizedBox(height: 12),
@@ -254,9 +254,10 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               if (_logsBusy)
                 const LinearProgressIndicator()
               else if (_logError.isNotEmpty)
-                Text(_logError,
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.error))
+                Text(
+                  _logError,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                )
               else
                 _mono(
                   _logs.isEmpty ? '(no log content)' : _logs.join('\n'),
@@ -339,7 +340,9 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(6),
       ),
-      constraints: maxHeight == null ? null : BoxConstraints(maxHeight: maxHeight),
+      constraints: maxHeight == null
+          ? null
+          : BoxConstraints(maxHeight: maxHeight),
       child: SingleChildScrollView(
         scrollDirection: Axis.vertical,
         child: SingleChildScrollView(

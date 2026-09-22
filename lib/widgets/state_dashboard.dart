@@ -41,15 +41,15 @@ class StateDashboard extends StatelessWidget {
   }
 
   List<Widget> _workerCards(DaemonState state, WorkerState worker) => [
-        PerformanceCard(worker: worker),
-        TargetCard(worker: worker),
-        IspCard(camera: worker.camera),
-        VisionCard(worker: worker),
-        ResourcesCard(resources: state.resources, features: state.features),
-        ViewControlCard(worker: worker),
-        UartCard(worker: worker),
-        StreamCard(worker: worker),
-      ];
+    PerformanceCard(worker: worker),
+    TargetCard(worker: worker),
+    IspCard(camera: worker.camera),
+    VisionCard(worker: worker),
+    ResourcesCard(resources: state.resources, features: state.features),
+    ViewControlCard(worker: worker),
+    UartCard(worker: worker),
+    StreamCard(worker: worker),
+  ];
 }
 
 /// Banner shown while the daemon is in a transitional state
@@ -75,15 +75,13 @@ class _TransitionBanner extends StatelessWidget {
             Expanded(
               child: Text(
                 'Transitioning: ${state.state}${state.pendingProfile != null ? ' → ${state.pendingProfile}' : ''}',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
             const SizedBox(width: 12),
-            const SizedBox(
-              width: 96,
-              child: LinearProgressIndicator(),
-            ),
+            const SizedBox(width: 96, child: LinearProgressIndicator()),
           ],
         ),
       ),
@@ -103,10 +101,21 @@ class DaemonCard extends StatelessWidget {
       title: 'Daemon',
       trailing: StateBadge(state: state.state),
       children: [
+        StatRow(label: 'mode', value: state.mode),
+        StatRow(
+          label: 'image settings',
+          value: state.imageSettingsLocked ? 'locked' : 'editable',
+        ),
         StatRow(label: 'profile', value: state.profile),
         StatRow(label: 'pending', value: state.pendingProfile ?? '-'),
         StatRow(label: 'rotation', value: '${state.rotation}°'),
         StatRow(label: 'config_rev', value: '${state.configRev}'),
+        if (state.configWarning.isNotEmpty)
+          StatRow(
+            label: 'config warning',
+            value: state.configWarning,
+            highlight: true,
+          ),
         StatRow(
           label: 'last known good',
           value: state.lastKnownGood.isEmpty ? '-' : state.lastKnownGood,
@@ -117,6 +126,13 @@ class DaemonCard extends StatelessWidget {
           value: '${(state.daemonUptimeS ?? 0).toStringAsFixed(0)} s',
         ),
         StatRow(label: 'restarts', value: '${state.restarts}'),
+        StatRow(
+          label: 'file service',
+          value:
+              ':${state.fileService.port} '
+              '${state.fileService.available ? 'ready' : 'locked'}',
+          highlight: state.fileService.enabled && !state.fileService.available,
+        ),
         StatRow(
           label: 'last error',
           value: state.lastError.isEmpty ? '-' : state.lastError,
@@ -206,10 +222,7 @@ class TargetCard extends StatelessWidget {
         backgroundColor: t.found ? Colors.green : Colors.red,
       ),
       children: [
-        StatRow(
-          label: 'position',
-          value: t.found ? '(${t.x}, ${t.y})' : '-',
-        ),
+        StatRow(label: 'position', value: t.found ? '(${t.x}, ${t.y})' : '-'),
         StatRow(label: 'pixels', value: '${t.pixels}'),
         StatRow(label: 'area', value: '${t.area}'),
         StatRow(label: 'rect', value: t.rect.join(',')),
@@ -236,7 +249,8 @@ class IspCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isp = camera.isp;
     final expMismatch = isp.exposureUs != camera.exposureUs;
-    final gainMismatch = isp.again != camera.again ||
+    final gainMismatch =
+        isp.again != camera.again ||
         isp.dgain != camera.dgain ||
         isp.ispDgain != camera.ispDgain;
     return MetricCard(
@@ -276,6 +290,7 @@ class IspCard extends StatelessWidget {
         ),
         const Divider(height: 16),
         StatRow(label: 'awb_auto', value: '${camera.awbAuto}'),
+        StatRow(label: 'adaptive tone', value: '${camera.ispAdaptiveTone}'),
         StatRow(label: 'iso', value: '${isp.iso}'),
         StatRow(label: 'luma', value: '${isp.averageLuma}'),
         StatRow(label: 'wb gain', value: isp.wbGain.join('/')),
@@ -296,10 +311,9 @@ class _PairHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       label,
-      style: Theme.of(context)
-          .textTheme
-          .labelSmall
-          ?.copyWith(fontWeight: FontWeight.bold),
+      style: Theme.of(
+        context,
+      ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold),
     );
   }
 }
@@ -320,8 +334,9 @@ class _PairRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color =
-        mismatch ? theme.colorScheme.error : theme.colorScheme.onSurface;
+    final color = mismatch
+        ? theme.colorScheme.error
+        : theme.colorScheme.onSurface;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
@@ -363,7 +378,7 @@ class VisionCard extends StatelessWidget {
     return MetricCard(
       title: 'Vision',
       children: [
-        StatRow(label: 'detector', value: v.detectorMode),
+        const StatRow(label: 'detector', value: 'NV21 green'),
         StatRow(label: 'roi', value: v.detectRoi.join(',')),
         StatRow(label: 'search radius', value: '${v.searchRadius}'),
         StatRow(
@@ -413,17 +428,18 @@ class ResourcesCard extends StatelessWidget {
           value:
               '${resources.mipiLoaded ? 'loaded' : 'not loaded'} (${resources.mipiUsers})',
         ),
-        StatRow(label: 'power', value: resources.powerW?.toStringAsFixed(1) ?? '-'),
+        StatRow(
+          label: 'power',
+          value: resources.powerW?.toStringAsFixed(1) ?? '-',
+        ),
         StatRow(
           label: 'reboot needed',
           value: resources.needsReboot ? 'yes' : 'no',
           highlight: resources.needsReboot,
         ),
-        StatRow(label: 'features preset', value: features.preset),
         StatRow(
-          label: 'overlay/rec/rtsp/uart',
-          value:
-              '${features.overlay}/${features.recording}/${features.rtsp}/${features.uartEnabled}',
+          label: 'overlay/rtsp/uart',
+          value: '${features.overlay}/${features.rtsp}/${features.uartEnabled}',
         ),
       ],
     );
@@ -439,6 +455,7 @@ class ViewControlCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final view = worker.view;
     final control = worker.control;
+    final overlay = worker.overlay;
     return MetricCard(
       title: 'View / Control',
       children: [
@@ -458,11 +475,29 @@ class ViewControlCard extends StatelessWidget {
         ),
         StatRow(label: 'space', value: view.coordinateSpace),
         StatRow(
+          label: 'overlay sync',
+          value:
+              '${overlay.frameSync ? 'on' : 'off'} '
+              'D ${overlay.detectionFrameId} '
+              'ok/miss ${overlay.matchedFrames}/${overlay.missedFrames}',
+          highlight: overlay.missedFrames > 0,
+        ),
+        StatRow(
+          label: 'sync wait',
+          value:
+              '${overlay.lastWaitUs} us / max ${overlay.maxWaitUs} us '
+              '(deadline ${overlay.syncTimeoutMs} ms)',
+          highlight: overlay.lastWaitUs >= overlay.syncTimeoutMs * 1000,
+        ),
+        StatRow(
           label: 'mode',
           value:
               '${control.mode} fx ${control.fx.toStringAsFixed(1)} fy ${control.fy.toStringAsFixed(1)}',
         ),
-        StatRow(label: 'roll', value: '${control.rollUnit} sign ${control.rollSign}'),
+        StatRow(
+          label: 'roll',
+          value: '${control.rollUnit} sign ${control.rollSign}',
+        ),
         StatRow(label: 'distance', value: control.distance.toStringAsFixed(2)),
       ],
     );
@@ -493,14 +528,16 @@ class UartCard extends StatelessWidget {
           highlight: u.crcErrors > 0,
         ),
         StatRow(
+          label: 'decode errors',
+          value: '${u.decodeErrors}',
+          highlight: u.decodeErrors > 0,
+        ),
+        StatRow(
           label: 'align drops',
           value: '${u.alignDrops}',
           highlight: u.alignDrops > 0,
         ),
-        StatRow(
-          label: 'tx gap us',
-          value: '${u.txMinGapUs}..${u.txMaxGapUs}',
-        ),
+        StatRow(label: 'tx gap us', value: '${u.txMinGapUs}..${u.txMaxGapUs}'),
         StatRow(
           label: 'telemetry',
           value: u.telemetryValid ? 'valid' : 'invalid',
@@ -512,6 +549,11 @@ class UartCard extends StatelessWidget {
               '${u.pitch.toStringAsFixed(1)}/${u.roll.toStringAsFixed(1)}/${u.yaw.toStringAsFixed(1)}',
         ),
         StatRow(label: 'air speed', value: u.airSpeed.toStringAsFixed(1)),
+        for (final value in u.values.entries)
+          StatRow(
+            label: 'rx.${value.key}',
+            value: value.value.toStringAsFixed(4),
+          ),
       ],
     );
   }
@@ -525,26 +567,15 @@ class StreamCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = worker.stream;
+    final udp = worker.udpTelemetry;
     return MetricCard(
-      title: 'RTSP / Recording',
+      title: 'RTSP encoder',
       children: [
         StatRow(
           label: 'rtsp',
           value: '${s.rtspEnabled ? 'on' : 'off'} :${s.rtspPort}',
         ),
         StatRow(label: 'rtsp clients', value: '${s.rtspClients}'),
-        StatRow(
-          label: 'recording',
-          value: s.recording ? 'yes (every ${s.recordEveryN})' : 'no',
-        ),
-        StatRow(
-          label: 'record path',
-          value: s.recordPath.isEmpty ? '-' : s.recordPath,
-        ),
-        StatRow(
-          label: 'record fps',
-          value: '${s.recordFps}',
-        ),
         StatRow(
           label: 'source/input',
           value: '${s.sourceFrames}/${s.inputFrames}',
@@ -553,10 +584,16 @@ class StreamCard extends StatelessWidget {
           label: 'encoded MB',
           value: (s.encodedBytes / 1048576).toStringAsFixed(1),
         ),
+        StatRow(label: 'encoded frames', value: '${s.encodedFrames}'),
+        const Divider(height: 16),
         StatRow(
-          label: 'record errors',
-          value: '${s.recordErrors}',
-          highlight: s.recordErrors > 0,
+          label: 'udp telemetry',
+          value: udp.running ? '${udp.host}:${udp.port} @ ${udp.hz} Hz' : 'off',
+        ),
+        StatRow(
+          label: 'udp sent/errors',
+          value: '${udp.sentPackets}/${udp.sendErrors}',
+          highlight: udp.sendErrors > 0,
         ),
       ],
     );

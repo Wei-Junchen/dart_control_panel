@@ -26,21 +26,18 @@ class MockDaemon {
     final daemon = MockDaemon._(server);
     server.listen((socket) {
       daemon._connections.add(socket);
-      socket.listen(
-        (data) async {
-          final text = utf8.decode(data, allowMalformed: true);
-          for (final line in LineSplitter.split(text)) {
-            if (line.trim().isEmpty) continue;
-            final replyLines = await handler(line);
-            if (replyLines == null) continue;
-            for (final reply in replyLines) {
-              socket.write(reply);
-              socket.write('\n');
-            }
+      socket.listen((data) async {
+        final text = utf8.decode(data, allowMalformed: true);
+        for (final line in LineSplitter.split(text)) {
+          if (line.trim().isEmpty) continue;
+          final replyLines = await handler(line);
+          if (replyLines == null) continue;
+          for (final reply in replyLines) {
+            socket.write(reply);
+            socket.write('\n');
           }
-        },
-        onError: (_) {},
-      );
+        }
+      }, onError: (_) {});
     });
     return daemon;
   }
@@ -90,10 +87,12 @@ void main() {
     });
 
     test('succeeds when accepted + result are valid and ids match', () async {
-      final daemon = await MockDaemon.start((requestLine) async => [
-            '{"v":1,"type":"accepted","id":42,"mono_us":123456789}',
-            '{"v":1,"type":"result","id":42,"ok":true,"state":"STREAMING","config_rev":184,"payload":{"answer":42}}',
-          ]);
+      final daemon = await MockDaemon.start(
+        (requestLine) async => [
+          '{"v":1,"type":"accepted","id":42,"mono_us":123456789}',
+          '{"v":1,"type":"result","id":42,"ok":true,"state":"STREAMING","config_rev":184,"payload":{"answer":42}}',
+        ],
+      );
       final client = DaemonClient(host: '127.0.0.1', port: daemon.port);
       final msg = await client.call(id: 42, op: 'get_state');
       await client.close();
@@ -136,10 +135,12 @@ void main() {
     });
 
     test('throws OperationFailed when result.ok == false', () async {
-      final daemon = await MockDaemon.start((requestLine) async => [
-            '{"v":1,"type":"accepted","id":42,"mono_us":1}',
-            '{"v":1,"type":"result","id":42,"ok":false,"state":"STREAMING","config_rev":184,"error":"gain verification failed: requested=1024/1024/1024 actual=..."}',
-          ]);
+      final daemon = await MockDaemon.start(
+        (requestLine) async => [
+          '{"v":1,"type":"accepted","id":42,"mono_us":1}',
+          '{"v":1,"type":"result","id":42,"ok":false,"state":"STREAMING","config_rev":184,"error":"gain verification failed: requested=1024/1024/1024 actual=..."}',
+        ],
+      );
       final client = DaemonClient(host: '127.0.0.1', port: daemon.port);
       try {
         await client.call(id: 42, op: 'apply_runtime');
@@ -155,10 +156,12 @@ void main() {
     });
 
     test('throws on id mismatch between accepted/result and request', () async {
-      final daemon = await MockDaemon.start((requestLine) async => [
-            '{"v":1,"type":"accepted","id":42,"mono_us":1}',
-            '{"v":1,"type":"result","id":999,"ok":true,"state":"STREAMING","config_rev":1,"payload":{}}',
-          ]);
+      final daemon = await MockDaemon.start(
+        (requestLine) async => [
+          '{"v":1,"type":"accepted","id":42,"mono_us":1}',
+          '{"v":1,"type":"result","id":999,"ok":true,"state":"STREAMING","config_rev":1,"payload":{}}',
+        ],
+      );
       final client = DaemonClient(host: '127.0.0.1', port: daemon.port);
       await expectLater(
         client.call(id: 42, op: 'get_state'),
@@ -169,9 +172,11 @@ void main() {
     });
 
     test('throws ProtocolException on a bare error line without id', () async {
-      final daemon = await MockDaemon.start((requestLine) async => [
-            '{"v":1,"type":"error","message":"invalid request"}',
-          ]);
+      final daemon = await MockDaemon.start(
+        (requestLine) async => [
+          '{"v":1,"type":"error","message":"invalid request"}',
+        ],
+      );
       final client = DaemonClient(host: '127.0.0.1', port: daemon.port);
       await expectLater(
         client.call(id: 42, op: 'get_state'),
@@ -184,9 +189,11 @@ void main() {
     test('accepts result directly when accepted line is missing', () async {
       // Some failure modes only deliver one line; per spec two lines are
       // returned, but the client must not hang forever waiting for both.
-      final daemon = await MockDaemon.start((requestLine) async => [
-            '{"v":1,"type":"result","id":42,"ok":true,"state":"STREAMING","config_rev":1,"payload":{"a":1}}',
-          ]);
+      final daemon = await MockDaemon.start(
+        (requestLine) async => [
+          '{"v":1,"type":"result","id":42,"ok":true,"state":"STREAMING","config_rev":1,"payload":{"a":1}}',
+        ],
+      );
       final client = DaemonClient(host: '127.0.0.1', port: daemon.port);
       final msg = await client.call(id: 42, op: 'get_state');
       expect(msg.ok, isTrue);
@@ -252,19 +259,17 @@ void main() {
 
     test('rejects a request id that is not an integer', () async {
       final client = DaemonClient(host: '127.0.0.1', port: 1);
-      expect(
-        () => client.call(id: 42.5, op: 'get_state'),
-        throwsArgumentError,
-      );
+      expect(() => client.call(id: 42.5, op: 'get_state'), throwsArgumentError);
       await client.close();
     });
 
-    test('one-request-per-connection: second call opens a new socket',
-        () async {
-      final daemon = await MockDaemon.start((requestLine) async => [
-            '{"v":1,"type":"accepted","id":9,"mono_us":1}',
-            '{"v":1,"type":"result","id":9,"ok":true,"state":"STOPPED","config_rev":1,"payload":{}}',
-          ]);
+    test('one-request-per-connection: second call opens a new socket', () async {
+      final daemon = await MockDaemon.start(
+        (requestLine) async => [
+          '{"v":1,"type":"accepted","id":9,"mono_us":1}',
+          '{"v":1,"type":"result","id":9,"ok":true,"state":"STOPPED","config_rev":1,"payload":{}}',
+        ],
+      );
       final client = DaemonClient(host: '127.0.0.1', port: daemon.port);
       await client.call(id: 9, op: 'heartbeat');
       await client.call(id: 9, op: 'heartbeat');

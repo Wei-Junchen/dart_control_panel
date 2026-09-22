@@ -16,12 +16,14 @@ import 'package:dart_control_panel/video/video_backend.dart';
 /// - separate lifecycle from [BoardSession]: a stream drop must not touch
 ///   control-plane state and vice versa.
 class VideoController extends ChangeNotifier {
-  VideoController({VideoBackend? backend}) {
+  VideoController({VideoBackend? backend, this.liveStream = false}) {
     _backend = backend;
     if (backend != null) {
       _subscribe(backend);
     }
   }
+
+  final bool liveStream;
 
   VideoBackend? _backend;
   StreamSubscription<VideoBackendEvent>? _eventsSub;
@@ -48,7 +50,7 @@ class VideoController extends ChangeNotifier {
   VideoBackend get _playerBackend {
     var backend = _backend;
     if (backend == null) {
-      backend = MediaKitBackend();
+      backend = MediaKitBackend(liveStream: liveStream);
       _backend = backend;
       _ownsBackend = true;
       _subscribe(backend);
@@ -77,13 +79,15 @@ class VideoController extends ChangeNotifier {
     }
   }
 
-  /// Rebuilds the player for the same URL. Only manual (UI button) — never
-  /// automatic, and never a worker restart.
-  Future<void> reconnect() {
+  /// Drops the current decoder/demuxer queue and opens the same URL again.
+  /// This is the live-preview "jump to live edge" operation; it never
+  /// restarts the board worker.
+  Future<void> reconnect() async {
     final url = _url;
-    if (url == null) return Future<void>.value();
+    if (url == null || _openInFlight) return;
     _reconnectCount++;
-    return open(url);
+    await _playerBackend.close();
+    await open(url);
   }
 
   Future<void> pause() async {

@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:dart_control_panel/controllers/board_session.dart';
 import 'package:dart_control_panel/widgets/connection_bar.dart';
 
-/// Global connection dock, pinned bottom-left across every page.
+/// Global connection dock laid out below every page (never over its content).
 ///
-/// Disconnected: host/port fields + Connect. Connected: status chip +
+/// Disconnected: board address + Connect. TCP control always uses port 9000.
+/// Connected: status chip +
 /// endpoint + Disconnect. The dock is the ONLY place a connection is
 /// started/stopped — switching pages never touches the session.
 class ConnectionDock extends StatelessWidget {
@@ -13,14 +14,12 @@ class ConnectionDock extends StatelessWidget {
     super.key,
     required this.session,
     required this.hostController,
-    required this.portController,
     required this.onConnect,
     required this.onDisconnect,
   });
 
   final BoardSession session;
   final TextEditingController hostController;
-  final TextEditingController portController;
   final VoidCallback onConnect;
   final VoidCallback onDisconnect;
 
@@ -31,6 +30,7 @@ class ConnectionDock extends StatelessWidget {
       builder: (context, _) {
         final connected = session.connected;
         return Card(
+          margin: EdgeInsets.zero,
           elevation: 4,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -39,10 +39,7 @@ class ConnectionDock extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (session.busy || session.connecting)
-                  const SizedBox(
-                    width: 320,
-                    child: LinearProgressIndicator(minHeight: 2),
-                  ),
+                  const LinearProgressIndicator(minHeight: 2),
                 if (connected)
                   Wrap(
                     spacing: 8,
@@ -54,7 +51,7 @@ class ConnectionDock extends StatelessWidget {
                       ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 240),
                         child: Text(
-                          '${session.host}:${session.port}',
+                          session.host,
                           style: Theme.of(context).textTheme.bodySmall,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -67,34 +64,22 @@ class ConnectionDock extends StatelessWidget {
                     ],
                   )
                 else
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
+                  Row(
                     children: [
-                      SizedBox(
-                        width: 160,
+                      Expanded(
                         child: TextField(
                           controller: hostController,
+                          onSubmitted: (_) => onConnect(),
                           decoration: const InputDecoration(
-                            labelText: 'Board address',
+                            labelText: 'Board IP',
+                            hintText: '10.149.242.1',
+                            prefixIcon: Icon(Icons.router_outlined),
                             isDense: true,
                             border: OutlineInputBorder(),
                           ),
                         ),
                       ),
-                      SizedBox(
-                        width: 72,
-                        child: TextField(
-                          controller: portController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Port',
-                            isDense: true,
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
+                      const SizedBox(width: 8),
                       FilledButton.icon(
                         onPressed: session.connecting ? null : onConnect,
                         icon: const Icon(Icons.link),
@@ -109,10 +94,9 @@ class ConnectionDock extends StatelessWidget {
                       constraints: const BoxConstraints(maxWidth: 340),
                       child: Text(
                         session.statusMessage!,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: Theme.of(context).colorScheme.error),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 2,
                       ),

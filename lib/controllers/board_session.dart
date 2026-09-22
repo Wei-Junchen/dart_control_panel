@@ -17,10 +17,7 @@ import 'package:dart_control_panel/repositories/board_repository.dart';
 /// afterwards — including on failure, so a rejected/rolled-back operation
 /// never leaves a fake toggle on screen.
 class BoardSession extends ChangeNotifier {
-  BoardSession({
-    this.host = DaemonClient.defaultHost,
-    this.port = 9000,
-  });
+  BoardSession({this.host = DaemonClient.defaultHost, this.port = 9000});
 
   String host;
   int port;
@@ -43,7 +40,7 @@ class BoardSession extends ChangeNotifier {
   bool get busy => _queue.isBusy;
   bool get connecting => _connecting;
 
-void updateEndpoint(String host, int port) {
+  void updateEndpoint(String host, int port) {
     this.host = host;
     this.port = port;
   }

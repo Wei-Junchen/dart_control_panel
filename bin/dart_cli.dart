@@ -43,7 +43,9 @@ Future<void> main(List<String> arguments) async {
   }
 
   if (positional.isEmpty) {
-    stderr.writeln('usage: dart run bin/dart_cli.dart [--host H] [--port P] <op> [args-json]');
+    stderr.writeln(
+      'usage: dart run bin/dart_cli.dart [--host H] [--port P] <op> [args-json]',
+    );
     exitCode = 2;
     return;
   }
@@ -77,27 +79,30 @@ Future<void> main(List<String> arguments) async {
         stdout.writeln(jsonEncode(state.envelope));
       case 'get_profiles':
         final profiles = await repository.getProfiles();
-        stdout.writeln(jsonEncode(
-          profiles.map(
-            (name, p) => MapEntry(name, {
-              'readout': p.readout,
-              'view': p.view,
-              'features': p.features,
-              'status': p.status,
-              'expected': p.expected == null
-                  ? null
-                  : {
-                      'sensor': p.expected!.sensor,
-                      'output': p.expected!.output,
-                      'fps': p.expected!.fps,
-                    },
-            }),
+        stdout.writeln(
+          jsonEncode(
+            profiles.map(
+              (name, p) => MapEntry(name, {
+                'readout': p.readout,
+                'view': p.view,
+                'status': p.status,
+                'expected': p.expected == null
+                    ? null
+                    : {
+                        'sensor': p.expected!.sensor,
+                        'output': p.expected!.output,
+                        'fps': p.expected!.fps,
+                      },
+              }),
+            ),
           ),
-        ));
+        );
       case 'get_schema':
         stdout.writeln(jsonEncode(await repository.getSchema()));
       case 'get_logs':
-        final lines = args['lines'] is num ? (args['lines'] as num).toInt() : 120;
+        final lines = args['lines'] is num
+            ? (args['lines'] as num).toInt()
+            : 120;
         for (final line in await repository.getLogs(lines: lines)) {
           stdout.writeln(line);
         }
@@ -106,7 +111,8 @@ Future<void> main(List<String> arguments) async {
       default:
         stderr.writeln('unknown op: $op');
         stderr.writeln(
-            'supported: get_state | get_profiles | get_schema | get_logs | heartbeat');
+          'supported: get_state | get_profiles | get_schema | get_logs | heartbeat',
+        );
         exitCode = 2;
     }
   } on OperationFailedException catch (e) {
@@ -125,29 +131,49 @@ void _printStateSummary(DaemonState state) {
   final sb = StringBuffer()
     ..writeln('state=          ${state.state}')
     ..writeln('profile=        ${state.profile}')
+    ..writeln(
+      'mode=           ${state.mode} locked=${state.imageSettingsLocked}',
+    )
     ..writeln('rotation=       ${state.rotation} config_rev=${state.configRev}')
-    ..writeln('features=       ${state.features.preset} '
-        'rtsp=${state.features.rtsp} rec=${state.features.recording} '
-        'overlay=${state.features.overlay}')
+    ..writeln(
+      'features=       '
+      'rtsp=${state.features.rtsp} '
+      'overlay=${state.features.overlay}',
+    )
     ..writeln('temperature=    ${state.resources.temperatureC}');
   if (w != null) {
     sb
-      ..writeln('fps=            '
-          '${w.performance.fps.toStringAsFixed(1)} '
-          'det=${w.performance.detectionFps.toStringAsFixed(1)} '
-          '(requested ${w.performance.requestedFps})')
-      ..writeln('target=         '
-          '${w.target.found ? 'found' : 'lost'} '
-          '(${w.target.x},${w.target.y}) px=${w.target.pixels} '
-          'area=${w.target.area}')
-      ..writeln('exposure_us=    ${w.camera.exposureUs} '
-          'actual=${w.camera.isp.exposureUs}')
-      ..writeln('gain=           ${w.camera.again}/${w.camera.dgain}/'
-          '${w.camera.ispDgain} actual=${w.camera.isp.again}/'
-          '${w.camera.isp.dgain}/${w.camera.isp.ispDgain}')
-      ..writeln('stream=         rtsp=${w.stream.rtspEnabled}:'
-          '${w.stream.rtspPort} clients=${w.stream.rtspClients} '
-          'rec=${w.stream.recording}');
+      ..writeln(
+        'fps=            '
+        '${w.performance.fps.toStringAsFixed(1)} '
+        'det=${w.performance.detectionFps.toStringAsFixed(1)} '
+        '(requested ${w.performance.requestedFps})',
+      )
+      ..writeln(
+        'target=         '
+        '${w.target.found ? 'found' : 'lost'} '
+        '(${w.target.x},${w.target.y}) px=${w.target.pixels} '
+        'area=${w.target.area}',
+      )
+      ..writeln(
+        'exposure_us=    ${w.camera.exposureUs} '
+        'actual=${w.camera.isp.exposureUs}',
+      )
+      ..writeln(
+        'gain=           ${w.camera.again}/${w.camera.dgain}/'
+        '${w.camera.ispDgain} actual=${w.camera.isp.again}/'
+        '${w.camera.isp.dgain}/${w.camera.isp.ispDgain}',
+      )
+      ..writeln(
+        'stream=         rtsp=${w.stream.rtspEnabled}:'
+        '${w.stream.rtspPort} clients=${w.stream.rtspClients} '
+        'encoded=${w.stream.encodedFrames}',
+      )
+      ..writeln(
+        'udp=            ${w.udpTelemetry.running} '
+        '${w.udpTelemetry.host}:${w.udpTelemetry.port} '
+        '${w.udpTelemetry.hz}Hz sent=${w.udpTelemetry.sentPackets}',
+      );
   }
   stdout.write(sb);
 }

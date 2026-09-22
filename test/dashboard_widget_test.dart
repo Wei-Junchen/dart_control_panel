@@ -5,12 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:dart_control_panel/models/daemon_state.dart';
+import 'package:dart_control_panel/controllers/telemetry_controller.dart';
 import 'package:dart_control_panel/screens/home_shell.dart';
+import 'package:dart_control_panel/telemetry/telemetry_sample.dart';
+import 'package:dart_control_panel/telemetry/telemetry_source.dart';
 import 'package:dart_control_panel/widgets/state_dashboard.dart';
 
 DaemonState _fixtureState() {
-  final raw = File('test/fixtures/payloads/state_envelope_full.json')
-      .readAsStringSync();
+  final raw = File(
+    'test/fixtures/payloads/state_envelope_full.json',
+  ).readAsStringSync();
   return DaemonState.fromEnvelope(jsonDecode(raw) as Map<String, dynamic>);
 }
 
@@ -23,8 +27,9 @@ Future<void> _pumpDashboard(WidgetTester tester, DaemonState state) async {
 }
 
 void main() {
-  testWidgets('renders all major sections from the full fixture',
-      (tester) async {
+  testWidgets('renders all major sections from the full fixture', (
+    tester,
+  ) async {
     await _pumpDashboard(tester, _fixtureState());
 
     // daemon card
@@ -58,23 +63,24 @@ void main() {
 
     // vision
     expect(find.text('Vision'), findsOneWidget);
-    expect(find.text('nv21_score'), findsOneWidget);
+    expect(find.text('NV21 green'), findsOneWidget);
 
     // uart
     expect(find.text('UART'), findsOneWidget);
     expect(find.text('OPEN'), findsOneWidget);
     expect(find.text('12400..13000'), findsOneWidget);
 
-    // stream / recording
-    expect(find.text('RTSP / Recording'), findsOneWidget);
+    // stream encoder
+    expect(find.text('RTSP encoder'), findsOneWidget);
     expect(find.text('on :8554'), findsOneWidget);
 
     // view/control
     expect(find.text('View / Control'), findsOneWidget);
   });
 
-  testWidgets('highlights requested/actual ISP difference in error color',
-      (tester) async {
+  testWidgets('highlights requested/actual ISP difference in error color', (
+    tester,
+  ) async {
     final state = _fixtureState();
     await _pumpDashboard(tester, state);
 
@@ -85,8 +91,7 @@ void main() {
     expect(style.fontWeight, FontWeight.bold);
   });
 
-  testWidgets('transitional state shows the transition banner',
-      (tester) async {
+  testWidgets('transitional state shows the transition banner', (tester) async {
     final base = _fixtureState();
     final transitional = DaemonState.fromEnvelope({
       'v': 1,
@@ -98,13 +103,16 @@ void main() {
     });
     await _pumpDashboard(tester, transitional);
 
-    expect(find.text('Transitioning: STANDBY_PENDING → full_square_360'),
-        findsOneWidget);
+    expect(
+      find.text('Transitioning: STANDBY_PENDING → full_square_360'),
+      findsOneWidget,
+    );
     expect(find.byType(LinearProgressIndicator), findsWidgets);
   });
 
-  testWidgets('transitional daemon state is flagged in the daemon card',
-      (tester) async {
+  testWidgets('transitional daemon state is flagged in the daemon card', (
+    tester,
+  ) async {
     final base = _fixtureState();
     final waking = DaemonState.fromEnvelope({
       'v': 1,
@@ -118,8 +126,9 @@ void main() {
     expect(DaemonState.isTransitionalState('STREAMING'), isFalse);
   });
 
-  testWidgets('missing worker renders daemon card only, no crash',
-      (tester) async {
+  testWidgets('missing worker renders daemon card only, no crash', (
+    tester,
+  ) async {
     final state = DaemonState.fromEnvelope({
       'v': 1,
       'payload': {'state': 'STOPPED'},
@@ -142,6 +151,8 @@ void main() {
       expect(find.text('Ground Test'), findsWidgets);
       expect(find.text('Mode'), findsWidgets);
       expect(find.text('Files'), findsWidgets);
+      expect(find.widgetWithText(TextField, 'Port'), findsNothing);
+      expect(find.widgetWithText(TextField, 'Board IP'), findsOneWidget);
     });
 
     testWidgets('uses NavigationBar on narrow windows', (tester) async {
@@ -161,11 +172,69 @@ void main() {
       // Mode page shows the shared "not connected" hint, not its own Connect
       await tester.tap(find.text('Mode'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Connect once'), findsOneWidget);
+      expect(find.textContaining('请先连接开发板'), findsOneWidget);
       // back to telemetry
       await tester.tap(find.text('Telemetry'));
       await tester.pumpAndSettle();
-      expect(find.text('Attitude (dummy)'), findsOneWidget);
+      expect(find.text('Attitude (UDP UART)'), findsOneWidget);
+    });
+
+    testWidgets('switching pages never stops the application UDP receiver', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final source = _LifecycleTelemetrySource();
+      final telemetry = TelemetryController(source: source);
+      addTearDown(telemetry.dispose);
+      await tester.pumpWidget(
+        MaterialApp(home: HomeShell(telemetryController: telemetry)),
+      );
+      expect(source.startCalls, 1);
+      source.emit(1);
+      expect(telemetry.samples, hasLength(1));
+
+      await tester.tap(find.text('Ground Test'));
+      await tester.pumpAndSettle();
+      source.emit(2);
+      expect(source.stopCalls, 0);
+      expect(telemetry.samples, hasLength(2));
+
+      await tester.tap(find.text('Mode'));
+      await tester.pumpAndSettle();
+      source.emit(3);
+      expect(source.stopCalls, 0);
+      expect(telemetry.samples, hasLength(3));
+
+      await tester.tap(find.text('Telemetry'));
+      await tester.pumpAndSettle();
+      expect(source.startCalls, 1);
+      expect(telemetry.samples, hasLength(3));
     });
   });
+}
+
+class _LifecycleTelemetrySource implements TelemetrySource {
+  int startCalls = 0;
+  int stopCalls = 0;
+  void Function(TelemetrySample)? _listener;
+
+  @override
+  String get label => 'lifecycle-test';
+
+  @override
+  void start(void Function(TelemetrySample sample) onSample) {
+    startCalls++;
+    _listener = onSample;
+  }
+
+  void emit(int value) => _listener?.call(
+    TelemetrySample(time: DateTime.now(), values: {'pitch': value.toDouble()}),
+  );
+
+  @override
+  Future<void> stop() async {
+    stopCalls++;
+  }
 }

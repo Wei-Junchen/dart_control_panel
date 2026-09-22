@@ -1,8 +1,6 @@
-
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:dart_control_panel/controllers/telemetry_controller.dart';
-import 'package:dart_control_panel/telemetry/dummy_telemetry_source.dart';
 import 'package:dart_control_panel/telemetry/telemetry_sample.dart';
 import 'package:dart_control_panel/telemetry/telemetry_source.dart';
 
@@ -32,16 +30,18 @@ class _ScriptedSource implements TelemetrySource {
   void emitNext() {
     emitted++;
     // synthesize a fresh sample so emitting can be scripted arbitrarily
-    _onSample?.call(TelemetrySample(
-      time: DateTime.now(),
-      values: {
-        'pitch': emitted.toDouble(),
-        'roll': emitted * 2.0,
-        'yaw': emitted * 3.0,
-        'air_speed': 15.0 + emitted,
-        'fps': 78.0,
-      },
-    ));
+    _onSample?.call(
+      TelemetrySample(
+        time: DateTime.now(),
+        values: {
+          'pitch': emitted.toDouble(),
+          'roll': emitted * 2.0,
+          'yaw': emitted * 3.0,
+          'air_speed': 15.0 + emitted,
+          'fps': 78.0,
+        },
+      ),
+    );
   }
 }
 
@@ -52,20 +52,26 @@ void main() {
 
     setUp(() {
       source = _ScriptedSource([
-        TelemetrySample(time: DateTime.now(), values: {
-          'pitch': 1.0,
-          'roll': 20.0,
-          'yaw': 30.0,
-          'air_speed': 15.0,
-          'fps': 78.0,
-        }),
-        TelemetrySample(time: DateTime.now(), values: {
-          'pitch': 2.0,
-          'roll': 22.0,
-          'yaw': 32.0,
-          'air_speed': 15.5,
-          'fps': 79.0,
-        }),
+        TelemetrySample(
+          time: DateTime.now(),
+          values: {
+            'pitch': 1.0,
+            'roll': 20.0,
+            'yaw': 30.0,
+            'air_speed': 15.0,
+            'fps': 78.0,
+          },
+        ),
+        TelemetrySample(
+          time: DateTime.now(),
+          values: {
+            'pitch': 2.0,
+            'roll': 22.0,
+            'yaw': 32.0,
+            'air_speed': 15.5,
+            'fps': 79.0,
+          },
+        ),
       ]);
       controller = TelemetryController(source: source);
     });
@@ -104,21 +110,26 @@ void main() {
       for (var i = 0; i < controller.window * 60 + 10; i++) {
         source.emitNext();
       }
-      expect(controller.samples.length, lessThanOrEqualTo(controller.window * 60 + 1));
+      expect(
+        controller.samples.length,
+        lessThanOrEqualTo(controller.window * 60 + 1),
+      );
     });
 
-    test('channel selection toggles and seriesFor only reflects selected data',
-        () {
-      controller.start();
-      source.emitNext();
-      expect(controller.selected, contains('pitch'));
-      controller.toggleChannel('pitch');
-      expect(controller.selected, isNot(contains('pitch')));
-      // series still available for any channel (chart decides what to plot)
-      expect(controller.seriesFor('pitch'), isNotEmpty);
-      expect(controller.seriesFor('fps'), isNotEmpty);
-      expect(controller.seriesFor('missing'), isEmpty);
-    });
+    test(
+      'channel selection toggles and seriesFor only reflects selected data',
+      () {
+        controller.start();
+        source.emitNext();
+        expect(controller.selected, contains('pitch'));
+        controller.toggleChannel('pitch');
+        expect(controller.selected, isNot(contains('pitch')));
+        // series still available for any channel (chart decides what to plot)
+        expect(controller.seriesFor('pitch'), isNotEmpty);
+        expect(controller.seriesFor('fps'), isNotEmpty);
+        expect(controller.seriesFor('missing'), isEmpty);
+      },
+    );
 
     test('latestValueOf returns NaN before data / for unknown channels', () {
       expect(controller.latestValueOf('pitch').isNaN, isTrue);
@@ -126,37 +137,6 @@ void main() {
       source.emitNext();
       expect(controller.latestValueOf('pitch'), 1.0);
       expect(controller.latestValueOf('nope').isNaN, isTrue);
-    });
-  });
-
-  group('DummyTelemetrySource', () {
-    test('emits plausible values on a fixed cadence', () async {
-      final source = DummyTelemetrySource(
-          interval: const Duration(milliseconds: 20));
-      final samples = <TelemetrySample>[];
-      source.start(samples.add);
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      await source.stop();
-      expect(samples.length, greaterThanOrEqualTo(5));
-      for (final s in samples) {
-        expect(TelemetryChannel.byId('pitch'), isNotNull);
-        expect(s.valueOf('pitch').isFinite, isTrue);
-        expect(s.valueOf('roll').isFinite, isTrue);
-        expect(s.valueOf('yaw').isFinite, isTrue);
-        expect(s.valueOf('fps'), closeTo(79.0, 10.0));
-      }
-    });
-
-    test('stop() halts generation', () async {
-      final source = DummyTelemetrySource(
-          interval: const Duration(milliseconds: 20));
-      var count = 0;
-      source.start((_) => count++);
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      await source.stop();
-      final stoppedAt = count;
-      await Future<void>.delayed(const Duration(milliseconds: 60));
-      expect(count, stoppedAt);
     });
   });
 }

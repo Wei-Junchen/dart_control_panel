@@ -54,8 +54,8 @@ class ConnectionController extends ChangeNotifier {
 
   /// Called when a poll returns valid state (or the probe succeeds).
   void onPollSuccess() {
-    final changed = status != BoardConnectionStatus.connected ||
-        consecutiveFailures != 0;
+    final changed =
+        status != BoardConnectionStatus.connected || consecutiveFailures != 0;
     status = BoardConnectionStatus.connected;
     consecutiveFailures = 0;
     successfulResponses++;
@@ -66,7 +66,8 @@ class ConnectionController extends ChangeNotifier {
   /// Called when a poll fails for any reason. Only transport-level failures
   /// count towards the backoff.
   void onPollFailure(ProtocolException error) {
-    final transport = error is ProtocolTransportClosed ||
+    final transport =
+        error is ProtocolTransportClosed ||
         error is ProtocolTimeout ||
         error is ProtocolCodecException;
     if (transport) {

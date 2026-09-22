@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:dart_control_panel/controllers/video_controller.dart';
+import 'package:dart_control_panel/video/media_kit_backend.dart';
 import 'package:dart_control_panel/video/video_backend.dart';
 
 import 'helpers/fake_video_backend.dart';
@@ -21,26 +22,28 @@ void main() {
   /// Flush microtasks so broadcast-stream events reach the controller.
   Future<void> flush() => pumpEventQueue();
 
-  test('open goes idle -> connecting, then decoder events drive status',
-      () async {
-    expect(controller.status, VideoStatus.idle);
-    final openFuture = controller.open('rtsp://10.149.242.1:8554/live');
-    expect(controller.status, VideoStatus.connecting);
-    await openFuture;
-    expect(backend.lastUrl, 'rtsp://10.149.242.1:8554/live');
+  test(
+    'open goes idle -> connecting, then decoder events drive status',
+    () async {
+      expect(controller.status, VideoStatus.idle);
+      final openFuture = controller.open('rtsp://10.149.242.1:8554/live');
+      expect(controller.status, VideoStatus.connecting);
+      await openFuture;
+      expect(backend.lastUrl, 'rtsp://10.149.242.1:8554/live');
 
-    backend.emitBuffering();
-    await flush();
-    expect(controller.status, VideoStatus.buffering);
-    backend.emitPlaying();
-    await flush();
-    expect(controller.status, VideoStatus.playing);
-    expect(controller.isActive, isTrue);
-    backend.emitPaused();
-    await flush();
-    expect(controller.status, VideoStatus.paused);
-    expect(controller.isActive, isFalse);
-  });
+      backend.emitBuffering();
+      await flush();
+      expect(controller.status, VideoStatus.buffering);
+      backend.emitPlaying();
+      await flush();
+      expect(controller.status, VideoStatus.playing);
+      expect(controller.isActive, isTrue);
+      backend.emitPaused();
+      await flush();
+      expect(controller.status, VideoStatus.paused);
+      expect(controller.isActive, isFalse);
+    },
+  );
 
   test('reconnect after stream error rebuilds only the player', () async {
     await controller.open('rtsp://host:8554/live');
@@ -52,6 +55,7 @@ void main() {
 
     await controller.reconnect();
     expect(backend.openCalls, 2);
+    expect(backend.closeCalls, 1);
     expect(controller.reconnectCount, 1);
     backend.emitPlaying();
     await flush();
@@ -74,10 +78,12 @@ void main() {
 
   test('second open while in flight is ignored (no pileup)', () async {
     var firstDone = false;
-    final slow = _SlowBackend(onOpen: () async {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      firstDone = true;
-    });
+    final slow = _SlowBackend(
+      onOpen: () async {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        firstDone = true;
+      },
+    );
     final c = VideoController(backend: slow);
     final f1 = c.open('rtsp://host:8554/live');
     final f2 = c.open('rtsp://another:8554/live'); // must be ignored
@@ -116,6 +122,33 @@ void main() {
     // emitting after dispose must not throw
     backend.emitPlaying();
     await flush();
+  });
+
+  test('live backend defaults cannot accumulate a playback cache', () {
+    expect(MediaKitBackend.defaultRtspTransport, 'tcp');
+    expect(MediaKitBackend.defaultBufferSize, lessThanOrEqualTo(1024 * 1024));
+    expect(MediaKitBackend.defaultOpenOptions['cache'], 'no');
+    expect(MediaKitBackend.defaultOpenOptions['cache-on-disk'], 'no');
+    expect(MediaKitBackend.defaultOpenOptions['cache-pause'], 'no');
+    expect(MediaKitBackend.defaultOpenOptions['demuxer-readahead-secs'], '0');
+    expect(
+      MediaKitBackend.defaultOpenOptions['demuxer-lavf-o'],
+      contains('nobuffer'),
+    );
+    expect(
+      MediaKitBackend.defaultOpenOptions['vd-lavc-o'],
+      contains('low_delay'),
+    );
+    expect(MediaKitBackend.defaultOpenOptions['framedrop'], 'yes');
+  });
+
+  test('live mode is opt-in so recording playback keeps normal timing', () {
+    final recording = VideoController(backend: FakeVideoBackend());
+    final live = VideoController(backend: FakeVideoBackend(), liveStream: true);
+    expect(recording.liveStream, isFalse);
+    expect(live.liveStream, isTrue);
+    recording.dispose();
+    live.dispose();
   });
 }
 

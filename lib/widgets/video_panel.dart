@@ -18,11 +18,13 @@ class VideoPanel extends StatelessWidget {
     required this.controller,
     required this.rtspAvailable,
     required this.url,
+    this.liveStream = false,
   });
 
   final VideoController controller;
   final bool rtspAvailable;
   final String url;
+  final bool liveStream;
 
   @override
   Widget build(BuildContext context) {
@@ -49,8 +51,11 @@ class VideoPanel extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.videocam_off_outlined,
-                  size: 56, color: Theme.of(context).colorScheme.outline),
+              Icon(
+                Icons.videocam_off_outlined,
+                size: 56,
+                color: Theme.of(context).colorScheme.outline,
+              ),
               const SizedBox(height: 12),
               const Text('Preview stopped'),
             ],
@@ -66,8 +71,14 @@ class VideoPanel extends StatelessWidget {
     final (color, label) = switch (status) {
       VideoStatus.idle => (theme.colorScheme.outline, 'stopped'),
       VideoStatus.connecting => (Colors.amber, 'connecting'),
-      VideoStatus.buffering => (Colors.amber, 'buffering'),
-      VideoStatus.playing => (Colors.green, 'playing'),
+      VideoStatus.buffering => (
+        Colors.amber,
+        liveStream ? 'waiting for live frame' : 'buffering',
+      ),
+      VideoStatus.playing => (
+        Colors.green,
+        liveStream ? 'live · no buffer' : 'playing',
+      ),
       VideoStatus.paused => (Colors.blueGrey, 'paused'),
       VideoStatus.error => (theme.colorScheme.error, 'stream error'),
     };
@@ -82,16 +93,18 @@ class VideoPanel extends StatelessWidget {
               status == VideoStatus.error
                   ? Icons.error_outline
                   : status.isActive
-                      ? Icons.videocam
-                      : Icons.videocam_outlined,
+                  ? Icons.videocam
+                  : Icons.videocam_outlined,
               size: 18,
               color: color,
             ),
             const SizedBox(width: 8),
             Text(
               label,
-              style: theme.textTheme.labelLarge
-                  ?.copyWith(color: color, fontWeight: FontWeight.w600),
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -109,42 +122,47 @@ class VideoPanel extends StatelessWidget {
   }
 
   Widget _action(BuildContext context, VideoStatus status) {
-    final busy = status == VideoStatus.connecting ||
-        status == VideoStatus.buffering;
+    final busy =
+        status == VideoStatus.connecting || status == VideoStatus.buffering;
     return switch (status) {
       VideoStatus.idle => FilledButton.icon(
-          onPressed: rtspAvailable && !busy
-              ? () => controller.open(url)
-              : null,
-          icon: const Icon(Icons.play_arrow, size: 18),
-          label: const Text('Start preview'),
-        ),
+        onPressed: rtspAvailable && !busy ? () => controller.open(url) : null,
+        icon: const Icon(Icons.play_arrow, size: 18),
+        label: const Text('Start preview'),
+      ),
       VideoStatus.error => FilledButton.icon(
-          onPressed: () => controller.reconnect(),
-          icon: const Icon(Icons.refresh, size: 18),
-          label: const Text('Reconnect player'),
-        ),
+        onPressed: () => controller.reconnect(),
+        icon: const Icon(Icons.refresh, size: 18),
+        label: const Text('Reconnect player'),
+      ),
       _ => Wrap(
-          spacing: 4,
-          children: [
+        spacing: 4,
+        children: [
+          if (liveStream)
+            IconButton(
+              tooltip: '丢弃旧帧并回到实时画面',
+              onPressed: busy ? null : () => controller.reconnect(),
+              icon: const Icon(Icons.skip_next),
+            )
+          else
             IconButton(
               tooltip: status == VideoStatus.paused ? 'Resume' : 'Pause',
               onPressed: busy
                   ? null
                   : () => status == VideoStatus.paused
-                      ? controller.resume()
-                      : controller.pause(),
-              icon: Icon(status == VideoStatus.paused
-                  ? Icons.play_arrow
-                  : Icons.pause),
+                        ? controller.resume()
+                        : controller.pause(),
+              icon: Icon(
+                status == VideoStatus.paused ? Icons.play_arrow : Icons.pause,
+              ),
             ),
-            IconButton(
-              tooltip: 'Stop preview',
-              onPressed: () => controller.stop(),
-              icon: const Icon(Icons.stop),
-            ),
-          ],
-        ),
+          IconButton(
+            tooltip: 'Stop preview',
+            onPressed: () => controller.stop(),
+            icon: const Icon(Icons.stop),
+          ),
+        ],
+      ),
     };
   }
 }
@@ -170,7 +188,7 @@ class RtspUnavailable extends StatelessWidget {
               const Text('RTSP is not enabled on this board'),
               const SizedBox(height: 4),
               Text(
-                'Enable the rtsp feature (Features screen) to preview video.',
+                'RTSP 仅在 Ground 模式可用；请到 Mode 页切换。',
                 style: theme.textTheme.bodySmall,
               ),
             ],

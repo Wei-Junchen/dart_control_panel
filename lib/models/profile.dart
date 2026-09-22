@@ -6,9 +6,9 @@ class Profile {
   Profile({
     required this.readout,
     required this.view,
-    required this.features,
     required this.status,
     this.expected,
+    this.supportedRotations = const [0, 90, 180, 270],
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) {
@@ -16,21 +16,25 @@ class Profile {
     return Profile(
       readout: v.str('readout'),
       view: v.str('view'),
-      features: v.str('features'),
       status: v.str('status'),
       expected: v.nested('expected') == null
           ? null
-          : Expected.fromJson(Map<String, dynamic>.from(json['expected'] as Map)),
+          : Expected.fromJson(
+              Map<String, dynamic>.from(json['expected'] as Map),
+            ),
+      supportedRotations: v.intList('supported_rotations').isEmpty
+          ? const [0, 90, 180, 270]
+          : v.intList('supported_rotations'),
     );
   }
 
   final String readout;
   final String view;
-  final String features;
 
   /// Optional per spec; empty string when the board does not provide it.
   final String status;
   final Expected? expected;
+  final List<int> supportedRotations;
 }
 
 class Expected {

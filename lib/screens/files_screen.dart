@@ -1,20 +1,25 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import 'package:dart_control_panel/controllers/file_controller.dart';
-import 'package:dart_control_panel/services/board_ssh.dart';
+import 'package:dart_control_panel/controllers/video_controller.dart';
+import 'package:dart_control_panel/services/board_file_api.dart';
+import 'package:dart_control_panel/widgets/video_panel.dart';
 
-/// 文件传输页：浏览板端文件（ssh），双击/按钮 scp 下载到本地；
-/// 本地选文件 scp 上传到板端。
-/// 认证：密钥（默认）或 用户名+密码（`sshpass`，密码仅内存、不持久化）。
+/// Read-only board file page over HTTP: browse, resumable download, log tail
+/// preview, and video playback. It never starts ssh/scp or reads known_hosts.
 class FilesScreen extends StatefulWidget {
-  const FilesScreen({super.key, required this.host, this.controller});
+  const FilesScreen({
+    super.key,
+    required this.host,
+    this.port = 9002,
+    this.controller,
+  });
 
   final String host;
-
-  /// Injectable for tests.
+  final int port;
   final FileController? controller;
 
   @override
@@ -22,20 +27,10 @@ class FilesScreen extends StatefulWidget {
 }
 
 class _FilesScreenState extends State<FilesScreen> {
-  String _user =
-      Platform.environment['DART_CTRL_SSH_USER']?.trim().isNotEmpty == true
-          ? Platform.environment['DART_CTRL_SSH_USER']!
-          : 'root';
-  String? _password;
-  late FileController _controller = widget.controller ??
-      FileController(
-        ssh: BoardSshImpl(widget.host, user: _user, password: _password),
-      );
+  late final FileController _controller =
+      widget.controller ??
+      FileController(api: HttpBoardFileApi(widget.host, port: widget.port));
   final TextEditingController _pathField = TextEditingController(text: '/');
-  final TextEditingController _userField =
-      TextEditingController(text: 'root');
-  final TextEditingController _passwordField =
-      TextEditingController(text: '');
 
   @override
   void initState() {
@@ -48,83 +43,14 @@ class _FilesScreenState extends State<FilesScreen> {
   void dispose() {
     _controller.removeListener(_onChanged);
     _pathField.dispose();
-    _userField.dispose();
-    _passwordField.dispose();
+    if (widget.controller == null) _controller.dispose();
     super.dispose();
   }
 
   void _onChanged() {
-    if (mounted) {
-      _pathField.text = _controller.path;
-      setState(() {});
-    }
-  }
-
-  /// Rebuilds the controller with new credentials. The password stays in
-  /// [TextEditingController]_memory only — never written to disk.
-  void _recreateController() {
-    _controller.removeListener(_onChanged);
-    _user = _userField.text.trim().isEmpty ? 'root' : _userField.text.trim();
-    final pwd = _passwordField.text;
-    _password = pwd.isEmpty ? null : pwd;
-    final fresh = widget.controller ??
-        FileController(
-          ssh: BoardSshImpl(widget.host, user: _user, password: _password),
-        );
-    setState(() => _controller = fresh);
-    _controller.addListener(_onChanged);
-    _controller.init();
-  }
-
-  Future<void> _openAuthDialog() async {
-    _userField.text = _user;
-    _passwordField.text = _password ?? '';
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('SSH 认证'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _userField,
-              decoration: const InputDecoration(
-                labelText: '用户名',
-                helperText: '默认 root',
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _passwordField,
-              obscureText: true,
-              enableSuggestions: false,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: '密码',
-                helperText: '留空 = 使用本机 SSH 密钥；密码仅本次会话有效，不会保存',
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              _recreateController();
-              Navigator.pop(context);
-            },
-            child: const Text('保存并连接'),
-          ),
-        ],
-      ),
-    );
+    if (!mounted) return;
+    _pathField.text = _controller.path;
+    setState(() {});
   }
 
   Future<void> _goTo(String path) async {
@@ -139,40 +65,99 @@ class _FilesScreenState extends State<FilesScreen> {
     _showStatus('Downloaded ${entry.name} → $dir');
   }
 
-  Future<void> _upload() async {
-    final file = await openFile();
-    if (file == null) return;
-    await _controller.upload(file.path);
-    _showStatus('Uploaded ${file.name} → ${_controller.path}');
+  bool _isText(RemoteEntry entry) {
+    final n = entry.name.toLowerCase();
+    return n.endsWith('.log') || n.endsWith('.txt') || n.endsWith('.json');
+  }
+
+  bool _isVideo(RemoteEntry entry) {
+    final n = entry.name.toLowerCase();
+    return n.endsWith('.h264') ||
+        n.endsWith('.mp4') ||
+        n.endsWith('.mkv') ||
+        n.endsWith('.avi');
+  }
+
+  Future<void> _previewText(RemoteEntry entry) async {
+    try {
+      final text = await _controller.readText(entry);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('${entry.name} · tail'),
+          content: SizedBox(
+            width: 900,
+            height: 560,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      _showStatus('Preview failed: $e');
+    }
+  }
+
+  Future<void> _previewVideo(RemoteEntry entry) async {
+    final player = VideoController();
+    final url = _controller.downloadUri(entry).toString();
+    unawaited(player.open(url));
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${entry.name} · ${_humanSize(entry.size)}'),
+        content: SizedBox(
+          width: 900,
+          height: 600,
+          child: VideoPanel(controller: player, rtspAvailable: true, url: url),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+    await player.stop();
+    player.dispose();
   }
 
   void _showStatus(String okMessage) {
     if (!mounted) return;
     final error = _controller.error;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(error ?? okMessage),
-      backgroundColor: error != null ? Colors.red.shade300 : null,
-      duration: const Duration(seconds: 4),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error ?? okMessage),
+        backgroundColor: error != null ? Colors.red.shade300 : null,
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Files — ${widget.host} (ssh/scp)'),
+        title: Text('Files — ${_controller.boardLabel} (HTTP read-only)'),
         actions: [
-          IconButton(
-            tooltip: 'SSH 认证设置',
-            icon: const Icon(Icons.key_outlined),
-            onPressed: _openAuthDialog,
-          ),
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _controller.probe();
-              _controller.refresh();
+            onPressed: () async {
+              await _controller.probe();
+              await _controller.refresh();
             },
           ),
           const SizedBox(width: 8),
@@ -204,7 +189,8 @@ class _FilesScreenState extends State<FilesScreen> {
                 child: TextField(
                   controller: _pathField,
                   decoration: const InputDecoration(
-                    labelText: 'Remote path',
+                    labelText: 'Virtual path',
+                    helperText: 'Only /logs and /recordings are exposed',
                     isDense: true,
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.folder, size: 18),
@@ -220,16 +206,20 @@ class _FilesScreenState extends State<FilesScreen> {
               ),
               const SizedBox(width: 4),
               IconButton(
-                tooltip: 'Test SSH',
+                tooltip: 'Test file service',
                 icon: Icon(
                   Icons.wifi_tethering,
-                  color: _controller.sshReady ? Colors.green : Colors.grey,
+                  color: _controller.serviceReady ? Colors.green : Colors.grey,
                 ),
                 onPressed: () async {
                   await _controller.probe();
                   await _controller.refresh();
                   if (mounted) {
-                    _showStatus(_controller.sshReady ? 'SSH OK' : 'SSH failed');
+                    _showStatus(
+                      _controller.serviceReady
+                          ? 'File service OK · ${_controller.boardLabel}'
+                          : 'File service unavailable',
+                    );
                   }
                 },
               ),
@@ -238,12 +228,6 @@ class _FilesScreenState extends State<FilesScreen> {
                 tooltip: 'Bookmark this path',
                 icon: const Icon(Icons.bookmark_add_outlined),
                 onPressed: _controller.addBookmark,
-              ),
-              const SizedBox(width: 4),
-              FilledButton.icon(
-                onPressed: _controller.busy ? null : _upload,
-                icon: const Icon(Icons.upload),
-                label: const Text('Upload'),
               ),
             ],
           ),
@@ -258,7 +242,7 @@ class _FilesScreenState extends State<FilesScreen> {
                     InputChip(
                       label: Text(b),
                       onPressed: () => _goTo(b),
-                      onDeleted: b.startsWith('/release')
+                      onDeleted: b == '/' || b == '/logs' || b == '/recordings'
                           ? null
                           : () => _controller.removeBookmark(b),
                     ),
@@ -272,7 +256,7 @@ class _FilesScreenState extends State<FilesScreen> {
 
   Widget? _errorBanner(BuildContext context) {
     final error = _controller.error;
-    final hint = _controller.sshHint();
+    final hint = _controller.serviceHint();
     if (error == null && hint == null) return null;
     return Container(
       width: double.infinity,
@@ -282,26 +266,14 @@ class _FilesScreenState extends State<FilesScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (hint != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                hint,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onErrorContainer,
-                  fontWeight: FontWeight.bold,
-                ),
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
+            Text(
+              hint,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onErrorContainer,
+                fontWeight: FontWeight.bold,
               ),
             ),
-          if (error != null)
-            Text(
-              error,
-              style:
-                  TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
+          if (error != null) Text(error, maxLines: 3),
         ],
       ),
     );
@@ -311,42 +283,57 @@ class _FilesScreenState extends State<FilesScreen> {
     if (_controller.loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    final entries = _controller.entries;
     return ListView.builder(
-      itemCount: entries.length,
+      itemCount: _controller.entries.length,
       itemBuilder: (context, index) {
-        final entry = entries[index];
+        final entry = _controller.entries[index];
         return ListTile(
           dense: true,
           leading: Icon(
             entry.isDir ? Icons.folder : Icons.insert_drive_file,
             color: entry.isDir ? Colors.amber[700] : Colors.blueGrey[300],
           ),
-          title: Text(
-            entry.isDir && !entry.name.endsWith('/')
-                ? '${entry.name}/'
-                : entry.name,
-          ),
+          title: Text(entry.isDir ? '${entry.name}/' : entry.name),
           subtitle: Text(
             entry.isDir
-                ? entry.modified
-                : '${_humanSize(entry.size)} · ${entry.modified}'
-                    '${entry.linkTarget != null ? ' -> ${entry.linkTarget}' : ''}',
+                ? _formatTime(entry)
+                : '${_humanSize(entry.size)} · ${_formatTime(entry)}',
           ),
           trailing: entry.isDir
               ? null
-              : IconButton(
-                  tooltip: 'Download',
-                  icon: Icon(
-                    Icons.download,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  onPressed:
-                      _controller.busy ? null : () => _download(entry),
+              : Wrap(
+                  spacing: 2,
+                  children: [
+                    if (_isText(entry))
+                      IconButton(
+                        tooltip: 'Preview log tail',
+                        icon: const Icon(Icons.article_outlined),
+                        onPressed: () => _previewText(entry),
+                      ),
+                    if (_isVideo(entry))
+                      IconButton(
+                        tooltip: 'Play over HTTP',
+                        icon: const Icon(Icons.play_circle_outline),
+                        onPressed: () => _previewVideo(entry),
+                      ),
+                    IconButton(
+                      tooltip: 'Download / resume',
+                      icon: Icon(
+                        Icons.download,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      onPressed: _controller.busy
+                          ? null
+                          : () => _download(entry),
+                    ),
+                  ],
                 ),
           onTap: entry.isDir
-              ? () => _goTo(
-                  FileController.joinPath(_controller.path, entry.name))
+              ? () => _goTo(entry.path)
+              : _isText(entry)
+              ? () => _previewText(entry)
+              : _isVideo(entry)
+              ? () => _previewVideo(entry)
               : null,
         );
       },
@@ -357,5 +344,13 @@ class _FilesScreenState extends State<FilesScreen> {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '${(bytes / 1048576).toStringAsFixed(1)} MB';
+  }
+
+  String _formatTime(RemoteEntry entry) {
+    final time = entry.modified?.toLocal();
+    if (time == null) return '-';
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${time.year}-${two(time.month)}-${two(time.day)} '
+        '${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
   }
 }

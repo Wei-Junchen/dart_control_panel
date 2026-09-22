@@ -12,8 +12,9 @@ import 'package:dart_control_panel/widgets/video_panel.dart';
 import 'helpers/fake_video_backend.dart';
 
 DaemonState _state() {
-  final raw = File('test/fixtures/payloads/state_envelope_full.json')
-      .readAsStringSync();
+  final raw = File(
+    'test/fixtures/payloads/state_envelope_full.json',
+  ).readAsStringSync();
   return DaemonState.fromEnvelope(jsonDecode(raw) as Map<String, dynamic>);
 }
 
@@ -71,8 +72,9 @@ void main() {
     expect(find.text('playing'), findsOneWidget);
   });
 
-  testWidgets('stream error shows message and Reconnect button',
-      (tester) async {
+  testWidgets('stream error shows message and Reconnect button', (
+    tester,
+  ) async {
     await pump(tester);
     await controller.open('rtsp://10.149.242.1:8554/live');
     backend.emitPlaying();
@@ -102,6 +104,34 @@ void main() {
     expect(button.onPressed, isNull);
   });
 
+  testWidgets('live preview offers jump-to-live instead of pause', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: VideoPanel(
+            controller: controller,
+            rtspAvailable: true,
+            url: 'rtsp://10.149.242.1:8554/live',
+            liveStream: true,
+          ),
+        ),
+      ),
+    );
+    await controller.open('rtsp://10.149.242.1:8554/live');
+    backend.emitPlaying();
+    await tester.pump();
+
+    expect(find.text('live · no buffer'), findsOneWidget);
+    expect(find.byTooltip('Pause'), findsNothing);
+    expect(find.byTooltip('丢弃旧帧并回到实时画面'), findsOneWidget);
+    await tester.tap(find.byTooltip('丢弃旧帧并回到实时画面'));
+    await tester.pump();
+    expect(backend.closeCalls, 1);
+    expect(backend.openCalls, 2);
+  });
+
   test('rtspAvailableFor requires both feature and stream flags', () {
     expect(rtspAvailableFor(_state()), isTrue); // fixture has both on
     final workerOff = DaemonState.fromEnvelope({
@@ -114,6 +144,9 @@ void main() {
     });
     expect(rtspAvailableFor(workerOff), isFalse);
     expect(rtspUrl('10.149.242.1'), 'rtsp://10.149.242.1:8554/live');
-    expect(rtspUrl('10.149.242.1', port: 9000), 'rtsp://10.149.242.1:9000/live');
+    expect(
+      rtspUrl('10.149.242.1', port: 9000),
+      'rtsp://10.149.242.1:9000/live',
+    );
   });
 }

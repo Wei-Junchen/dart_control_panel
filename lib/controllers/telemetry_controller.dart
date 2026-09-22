@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import 'package:dart_control_panel/telemetry/dummy_telemetry_source.dart';
+import 'package:dart_control_panel/telemetry/udp_telemetry_source.dart';
 import 'package:dart_control_panel/telemetry/telemetry_source.dart';
 import 'package:dart_control_panel/telemetry/telemetry_sample.dart';
 
@@ -13,11 +13,11 @@ class TelemetryPoint {
 }
 
 /// Live telemetry hub: owns a [TelemetrySource] (dummy until the board has a
-/// real interface), a time-capped sample ring buffer, and the set of charted
+/// UDP stream), a time-capped sample ring buffer, and the set of charted
 /// channels. Pure Dart + ChangeNotifier.
 class TelemetryController extends ChangeNotifier {
   TelemetryController({TelemetrySource? source, this.window = 20})
-      : _source = source ?? DummyTelemetrySource();
+    : _source = source ?? UdpTelemetrySource();
 
   /// Checked channels are plotted.
   static const defaultSelected = {'pitch', 'roll', 'yaw'};
@@ -40,8 +40,7 @@ class TelemetryController extends ChangeNotifier {
   List<TelemetrySample> get samples => List.unmodifiable(_samples);
 
   /// Latest sample (drives the 3D attitude view); null before the first tick.
-  TelemetrySample? get latest =>
-      _samples.isEmpty ? null : _samples.last;
+  TelemetrySample? get latest => _samples.isEmpty ? null : _samples.last;
 
   /// pitch/roll/yaw in degrees from the latest sample (NaN when missing).
   ({double pitch, double roll, double yaw}) get attitude {
@@ -67,21 +66,19 @@ class TelemetryController extends ChangeNotifier {
     _notify();
   }
 
+  /// Forget samples from the previous connection/board.
+  void clear() {
+    if (_disposed || _samples.isEmpty) return;
+    _samples.clear();
+    _notify();
+  }
+
   void toggleChannel(String channel) {
     if (_disposed) return;
     if (!_selected.remove(channel)) {
       _selected.add(channel);
     }
     _notify();
-  }
-
-  /// Ground/flight envelope for the dummy source; wired to the board mode
-  /// (see update.md) once the board implements set_mode.
-  void setModeProfile(String mode) {
-    final source = _source;
-    if (source is DummyTelemetrySource) {
-      source.setProfile(mode);
-    }
   }
 
   void _onSample(TelemetrySample sample) {

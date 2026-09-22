@@ -40,13 +40,31 @@ class BoardRepository {
   Future<Map<String, Profile>> getProfiles() async {
     final msg = await _client.call(id: nextId, op: 'get_profiles');
     final payload = _requirePayload(msg, 'get_profiles');
-    return payload.map((name, raw) {
-      final json = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    // Current protocol wraps the table so schema_version can evolve without
+    // becoming a fake profile. Accept the short-lived flat v1 form too.
+    final rawProfiles = payload['profiles'];
+    final profiles = rawProfiles is Map
+        ? Map<String, dynamic>.from(rawProfiles)
+        : payload;
+    return profiles.map((name, raw) {
+      final json = raw is Map
+          ? Map<String, dynamic>.from(raw)
+          : <String, dynamic>{};
       return MapEntry(name, Profile.fromJson(json));
     });
   }
 
-  /// `get_schema` -> raw capability map (ops / runtime keys / presets).
+  /// The one complete persistent board configuration.
+  Future<Map<String, dynamic>> getConfig() async {
+    final msg = await _client.call(id: nextId, op: 'get_config');
+    return Map<String, dynamic>.from(_requirePayload(msg, 'get_config'));
+  }
+
+  /// Replaces the complete persistent configuration after daemon validation.
+  Future<DaemonState> setConfig(Map<String, dynamic> config) =>
+      _stateOp('set_config', {'config': config});
+
+  /// `get_schema` -> raw capability map.
   Future<Map<String, dynamic>> getSchema() async {
     final msg = await _client.call(id: nextId, op: 'get_schema');
     return _requirePayload(msg, 'get_schema');
@@ -77,10 +95,7 @@ class BoardRepository {
   Future<ApplyRuntimeResult> applyRuntime(Map<String, dynamic> args) async {
     final msg = await _client.call(id: nextId, op: 'apply_runtime', args: args);
     final refreshed = await getState();
-    return ApplyRuntimeResult(
-      message: msg.message ?? '',
-      state: refreshed,
-    );
+    return ApplyRuntimeResult(message: msg.message ?? '', state: refreshed);
   }
 
   // --- P4 camera lifecycle (all return the state envelope, unwrapped) ------
@@ -110,39 +125,13 @@ class BoardRepository {
   Future<DaemonState> setRotation(int degrees) =>
       _stateOp('set_rotation', {'degrees': degrees});
 
-  /// `set_features`: only the provided keys are sent.
-  Future<DaemonState> setFeatures({
-    bool? rtsp,
-    bool? recording,
-    bool? overlay,
-    bool? uart,
-    int? recordEveryN,
-  }) {
-    final args = <String, dynamic>{};
-    if (rtsp != null) args['rtsp'] = rtsp;
-    if (recording != null) args['recording'] = recording;
-    if (overlay != null) args['overlay'] = overlay;
-    if (uart != null) args['uart'] = uart;
-    if (recordEveryN != null) args['record_every_n'] = recordEveryN;
-    return _stateOp('set_features', args);
-  }
+  /// Atomically switches the complete board policy between ground/flight.
+  Future<DaemonState> setOperatingMode(String mode) =>
+      _stateOp('set_operating_mode', {'mode': mode});
 
-  Future<DaemonState> applyFeaturePreset(String preset) =>
-      _stateOp('apply_feature_preset', {'preset': preset});
-
-  /// Start or adjust recording; wakes the sensor if needed.
-  Future<DaemonState> startRecording({int recordEveryN = 4}) =>
-      _stateOp('start_recording', {'record_every_n': recordEveryN});
-
-  Future<DaemonState> stopRecording() => _stateOp('stop_recording');
-
-  /// Close the current file and start a new one; must be recording.
-  Future<DaemonState> rotateRecording() => _stateOp('rotate_recording');
-
-  /// `set_mode` — ground (地面测试) / flight (实战). Proposal in update.md;
-  /// until the board implements it, this fails with the daemon's "unknown op".
-  Future<DaemonState> setMode(String mode) =>
-      _stateOp('set_mode', {'mode': mode});
+  /// Starts/stops one flight capture session. Valid only in flight mode.
+  Future<DaemonState> setFlightActive(bool active) =>
+      _stateOp('set_flight_active', {'active': active});
 
   /// Reboots the board with the required explicit confirmation. Returns the
   /// reboot schedule payload. Never call this without a user double-confirm.

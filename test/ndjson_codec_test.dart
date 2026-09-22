@@ -96,7 +96,9 @@ void main() {
       final dec = NdjsonCodec().streamDecoder();
       final events = <StreamDecodeEvent>[];
       dec.events.listen(events.add);
-      final bytes = utf8.encode('{"v":1,"type":"accepted","id":42,"mono_us":1}\n');
+      final bytes = utf8.encode(
+        '{"v":1,"type":"accepted","id":42,"mono_us":1}\n',
+      );
       for (final b in bytes) {
         dec.addChunk([b]);
       }
@@ -110,8 +112,11 @@ void main() {
       final dec = NdjsonCodec().streamDecoder();
       final events = <StreamDecodeEvent>[];
       dec.events.listen(events.add);
-      dec.addChunk(utf8.encode(
-          '{"v":1,"type":"accepted","id":42}\n{"v":1,"type":"result","id":42,"ok":true}\n'));
+      dec.addChunk(
+        utf8.encode(
+          '{"v":1,"type":"accepted","id":42}\n{"v":1,"type":"result","id":42,"ok":true}\n',
+        ),
+      );
       dec.close();
       await Future<void>.delayed(Duration.zero);
       expect(events, hasLength(2));
@@ -122,7 +127,9 @@ void main() {
       final dec = NdjsonCodec().streamDecoder();
       final events = <StreamDecodeEvent>[];
       dec.events.listen(events.add);
-      dec.addChunk(utf8.encode('{bad json}\n{"v":1,"type":"result","id":2,"ok":true}\n'));
+      dec.addChunk(
+        utf8.encode('{bad json}\n{"v":1,"type":"result","id":2,"ok":true}\n'),
+      );
       dec.close();
       await Future<void>.delayed(Duration.zero);
       expect(events, hasLength(2));

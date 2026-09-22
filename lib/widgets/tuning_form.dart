@@ -17,6 +17,7 @@ class TuningForm extends StatefulWidget {
     required this.onRevert,
     required this.onReload,
     this.busy = false,
+    this.locked = false,
   });
 
   final RuntimeDraft draft;
@@ -24,6 +25,7 @@ class TuningForm extends StatefulWidget {
   final VoidCallback onRevert;
   final VoidCallback onReload;
   final bool busy;
+  final bool locked;
 
   @override
   State<TuningForm> createState() => TuningFormState();
@@ -32,6 +34,7 @@ class TuningForm extends StatefulWidget {
 class TuningFormState extends State<TuningForm> {
   final Map<String, TextEditingController> _controllers = {};
   final Map<String, String> _parseErrors = <String, String>{};
+  bool get _disabled => widget.busy || widget.locked;
 
   String _fmt(dynamic v) {
     if (v == null) return '';
@@ -41,9 +44,10 @@ class TuningFormState extends State<TuningForm> {
     return v.toString();
   }
 
-  TextEditingController _controller(String field) =>
-      _controllers.putIfAbsent(
-          field, () => TextEditingController(text: _fmt(widget.draft.valueOf(field))));
+  TextEditingController _controller(String field) => _controllers.putIfAbsent(
+    field,
+    () => TextEditingController(text: _fmt(widget.draft.valueOf(field))),
+  );
 
   /// Repopulate every field from the draft (initial load / reload / revert /
   /// apply-success). Never called by the poll.
@@ -112,22 +116,17 @@ class TuningFormState extends State<TuningForm> {
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
                 'Cannot apply: $errorText',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.error),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
               ),
             ),
           _section(theme, 'Detector', [
-            _enumChips(
-              'Mode',
-              RuntimeDraft.detectorMode,
-              const ['lab', 'nv21_score', 'fast'],
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text('NV21 green score（唯一识别器）'),
             ),
-            _labEditor(),
             _greenScoreEditor(),
-            _grid([
-              _intField(RuntimeDraft.coarseStride, 'coarse stride'),
-              _intField(RuntimeDraft.refineRadius, 'refine radius'),
-            ]),
             _roiEditor(),
             _grid([
               _intField(RuntimeDraft.searchRadius, 'search radius'),
@@ -150,23 +149,22 @@ class TuningFormState extends State<TuningForm> {
               _intField(RuntimeDraft.ispDgain, 'isp dgain (1024=1x)'),
             ]),
             _boolSwitch(RuntimeDraft.awbAuto, 'awb auto'),
+            _boolSwitch(RuntimeDraft.ispAdaptiveTone, 'adaptive tone'),
           ]),
           _section(theme, 'Control', [
-            _enumChips(
-              'mode',
-              RuntimeDraft.controlMode,
-              const ['pixel', 'angle_rad'],
-            ),
+            _enumChips('mode', RuntimeDraft.controlMode, const [
+              'pixel',
+              'angle_rad',
+            ]),
             _grid([
               _floatField(RuntimeDraft.fx, 'fx'),
               _floatField(RuntimeDraft.fy, 'fy'),
             ]),
             _grid([
-              _enumChips(
-                'roll unit',
-                RuntimeDraft.rollUnit,
-                const ['deg', 'rad'],
-              ),
+              _enumChips('roll unit', RuntimeDraft.rollUnit, const [
+                'deg',
+                'rad',
+              ]),
               _floatField(RuntimeDraft.rollSign, 'roll sign'),
             ]),
             _grid([_floatField(RuntimeDraft.distance, 'distance')]),
@@ -174,6 +172,12 @@ class TuningFormState extends State<TuningForm> {
           _section(theme, 'Display', [
             _boolSwitch(RuntimeDraft.overlay, 'overlay'),
             _boolSwitch(RuntimeDraft.overlayRoi, 'overlay roi'),
+            _grid([
+              _intField(
+                RuntimeDraft.overlaySyncTimeoutMs,
+                'frame sync timeout ms',
+              ),
+            ]),
             _boolSwitch(RuntimeDraft.resetTracker, 'reset tracker (one-shot)'),
           ]),
           const SizedBox(height: 24),
@@ -183,8 +187,9 @@ class TuningFormState extends State<TuningForm> {
   }
 
   Widget _actionBar(ThemeData theme, String errorText) {
-    final canApply = widget.draft.hasChanges &&
-        !widget.busy &&
+    final canApply =
+        widget.draft.hasChanges &&
+        !_disabled &&
         widget.draft.validate().isEmpty;
     return Card(
       margin: EdgeInsets.zero,
@@ -201,8 +206,9 @@ class TuningFormState extends State<TuningForm> {
               label: const Text('Apply'),
             ),
             OutlinedButton(
-              onPressed:
-                  widget.draft.hasChanges && !widget.busy ? widget.onRevert : null,
+              onPressed: widget.draft.hasChanges && !widget.busy
+                  ? widget.onRevert
+                  : null,
               child: const Text('Revert local edits'),
             ),
             TextButton(
@@ -215,11 +221,17 @@ class TuningFormState extends State<TuningForm> {
                 height: 16,
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
+            if (widget.locked)
+              const Chip(
+                avatar: Icon(Icons.lock, size: 16),
+                label: Text('Flight mode locked'),
+              ),
             if (widget.draft.hasChanges)
               Text(
                 '${widget.draft.changedFields.length} changed',
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: theme.colorScheme.primary),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
               ),
           ],
         ),
@@ -235,9 +247,12 @@ class TuningFormState extends State<TuningForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w600)),
+            Text(
+              title,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: 10),
             ...children,
           ],
@@ -278,7 +293,7 @@ class TuningFormState extends State<TuningForm> {
             child: TextField(
               key: ValueKey('field.$field'),
               controller: controller,
-              enabled: !widget.busy,
+              enabled: !_disabled,
               decoration: InputDecoration(
                 isDense: true,
                 errorText: error.isEmpty ? null : error,
@@ -314,7 +329,7 @@ class TuningFormState extends State<TuningForm> {
             child: TextField(
               key: ValueKey('field.$field'),
               controller: controller,
-              enabled: !widget.busy,
+              enabled: !_disabled,
               decoration: InputDecoration(
                 isDense: true,
                 errorText: error.isEmpty ? null : error,
@@ -330,12 +345,10 @@ class TuningFormState extends State<TuningForm> {
   }
 
   Widget _grid(List<Widget> children) => Wrap(
-        spacing: 12,
-        runSpacing: 4,
-        children: [
-          for (final c in children) SizedBox(width: 260, child: c),
-        ],
-      );
+    spacing: 12,
+    runSpacing: 4,
+    children: [for (final c in children) SizedBox(width: 260, child: c)],
+  );
 
   Widget _enumChips(String label, String field, List<String> options) {
     final current = widget.draft.valueOf(field)?.toString();
@@ -357,7 +370,7 @@ class TuningFormState extends State<TuningForm> {
                   ChoiceChip(
                     label: Text(option),
                     selected: current == option,
-                    onSelected: widget.busy
+                    onSelected: _disabled
                         ? null
                         : (_) => widget.draft.edit(field, option),
                   ),
@@ -384,7 +397,7 @@ class TuningFormState extends State<TuningForm> {
           ),
           Switch(
             value: value,
-            onChanged: widget.busy ? null : (v) => widget.draft.edit(field, v),
+            onChanged: _disabled ? null : (v) => widget.draft.edit(field, v),
           ),
         ],
       ),
@@ -392,63 +405,6 @@ class TuningFormState extends State<TuningForm> {
   }
 
   // --- composite editors ----------------------------------------------------
-
-  Widget _labEditor() {
-    const labels = ['Lmin', 'Lmax', 'Amin', 'Amax', 'Bmin', 'Bmax'];
-    final lab = widget.draft.labList;
-    final error = widget.draft.validate()[RuntimeDraft.lab] ?? '';
-    final fields = <Widget>[];
-    for (var i = 0; i < 6; i++) {
-      final key = 'lab[$i]';
-      final controller = _controllers.putIfAbsent(
-        key,
-        () => TextEditingController(text: '${lab[i]}'),
-      );
-      fields.add(
-        SizedBox(
-          width: 72,
-          child: TextField(
-            key: ValueKey('field.lab[$i]'),
-            controller: controller,
-            enabled: !widget.busy,
-            decoration: InputDecoration(
-              labelText: labels[i],
-              isDense: true,
-              errorText: i == 0 && error.isNotEmpty ? error : null,
-              errorMaxLines: 3,
-              border: const OutlineInputBorder(),
-            ),
-            onChanged: (text) {
-              final v = int.tryParse(text.trim());
-              if (v == null) {
-                setState(() => _parseErrors[RuntimeDraft.lab] = 'invalid lab int');
-                return;
-              }
-              setState(() => _parseErrors.remove(RuntimeDraft.lab));
-              widget.draft.setLabComponent(i, v);
-            },
-          ),
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _dirtyDot(RuntimeDraft.lab),
-              const Text('lab (L,A,B min/max)',
-                  style: TextStyle(fontSize: 12)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Wrap(spacing: 8, runSpacing: 4, children: fields),
-        ],
-      ),
-    );
-  }
 
   Widget _greenScoreEditor() {
     const labels = [
@@ -486,20 +442,20 @@ class TuningFormState extends State<TuningForm> {
       children: [
         Row(
           children: [
-_dirtyDot(field),
-              Flexible(
-                child: Text(
-                  label,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
+            _dirtyDot(field),
+            Flexible(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.bodySmall,
+                overflow: TextOverflow.ellipsis,
               ),
+            ),
           ],
         ),
         TextField(
           key: ValueKey('field.$field'),
           controller: _controller(field),
-          enabled: !widget.busy,
+          enabled: !_disabled,
           decoration: InputDecoration(
             isDense: true,
             errorText: error.isEmpty ? null : error,
@@ -531,11 +487,11 @@ _dirtyDot(field),
           Wrap(
             spacing: 6,
             children: [
-              for (final m in ['region', 'off', 'none', 'legacy'])
+              for (final m in ['region', 'full'])
                 ChoiceChip(
                   label: Text(m),
                   selected: mode == m,
-                  onSelected: widget.busy
+                  onSelected: _disabled
                       ? null
                       : (_) {
                           if (m == 'region') {
@@ -592,7 +548,7 @@ _dirtyDot(field),
           key,
           () => TextEditingController(text: '$value'),
         ),
-        enabled: !widget.busy && widget.draft.roiMode == 'region',
+        enabled: !_disabled && widget.draft.roiMode == 'region',
         decoration: InputDecoration(
           labelText: label,
           isDense: true,
@@ -603,13 +559,20 @@ _dirtyDot(field),
         onChanged: (text) {
           final v = int.tryParse(text.trim());
           if (v == null) {
-            setState(() => _parseErrors[RuntimeDraft.detectRoi] = 'invalid roi int');
+            setState(
+              () => _parseErrors[RuntimeDraft.detectRoi] = 'invalid roi int',
+            );
             return;
           }
           setState(() => _parseErrors.remove(RuntimeDraft.detectRoi));
           final current = List<int>.of(widget.draft.roiList);
           current[index] = v;
-          widget.draft.setRoiRect(current[0], current[1], current[2], current[3]);
+          widget.draft.setRoiRect(
+            current[0],
+            current[1],
+            current[2],
+            current[3],
+          );
         },
       ),
     );

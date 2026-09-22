@@ -9,8 +9,9 @@ import 'package:dart_control_panel/models/runtime_draft.dart';
 import 'package:dart_control_panel/widgets/tuning_form.dart';
 
 DaemonState _fixtureState() {
-  final raw = File('test/fixtures/payloads/state_envelope_full.json')
-      .readAsStringSync();
+  final raw = File(
+    'test/fixtures/payloads/state_envelope_full.json',
+  ).readAsStringSync();
   return DaemonState.fromEnvelope(jsonDecode(raw) as Map<String, dynamic>);
 }
 
@@ -55,12 +56,16 @@ void main() {
     expect(exposure.controller!.text, '1000');
     final again = tester.widget<TextField>(field('again'));
     expect(again.controller!.text, '1024');
-    final lab2 = tester.widget<TextField>(field('lab[2]'));
-    expect(lab2.controller!.text, '-128');
+    final syncTimeout = tester.widget<TextField>(
+      field('overlay_sync_timeout_ms'),
+    );
+    expect(syncTimeout.controller!.text, '6');
+    expect(find.textContaining('NV21 green'), findsOneWidget);
   });
 
-  testWidgets('typing marks the field dirty and counts changes',
-      (tester) async {
+  testWidgets('typing marks the field dirty and counts changes', (
+    tester,
+  ) async {
     await pump(tester);
     await tester.enterText(field('exposure_us'), '1500');
     await tester.pump();
@@ -69,9 +74,9 @@ void main() {
     expect(find.text('1 changed'), findsOneWidget);
   });
 
-  testWidgets('invalid text does not touch the draft', (tester) async {
+  testWidgets('invalid integer text does not touch the draft', (tester) async {
     await pump(tester);
-    await tester.enterText(field('coarse_stride'), '');
+    await tester.enterText(field('search_radius'), '');
     await tester.pump();
     expect(draft.hasChanges, isFalse);
     expect(find.text('must be an integer'), findsOneWidget);
@@ -113,23 +118,15 @@ void main() {
     expect(reloadCalls, 1);
   });
 
-  testWidgets('lab CSV stays space-free through component edits',
-      (tester) async {
+  testWidgets('ROI mode chips switch between region and full frame', (
+    tester,
+  ) async {
     await pump(tester);
-    await tester.enterText(field('lab[0]'), '25');
+    await tester.tap(find.widgetWithText(ChoiceChip, 'full'));
     await tester.pump();
-    expect(draft.labList[0], 25);
-    expect(draft.valueOf(RuntimeDraft.lab), '25,60,-128,-20,0,60');
-    expect(draft.valueOf(RuntimeDraft.lab), isNot(contains(' ')));
-  });
-
-  testWidgets('ROI mode chips switch to off/none/legacy', (tester) async {
-    await pump(tester);
-    await tester.tap(find.widgetWithText(ChoiceChip, 'off'));
-    await tester.pump();
-    expect(draft.roiMode, 'off');
-    expect(draft.valueOf(RuntimeDraft.detectRoi), 'off');
-    // ROI rectangle fields are removed in off mode
+    expect(draft.roiMode, 'full');
+    expect(draft.valueOf(RuntimeDraft.detectRoi), 'full');
+    // ROI rectangle fields are removed in full-frame mode.
     expect(find.byKey(const ValueKey('field.roi[0]')), findsNothing);
     // switching back to region restores them with the previous rect
     await tester.tap(find.widgetWithText(ChoiceChip, 'region'));
@@ -138,8 +135,9 @@ void main() {
     expect(find.byKey(const ValueKey('field.roi[0]')), findsOneWidget);
   });
 
-  testWidgets('syncFromDraft restores board values after external load',
-      (tester) async {
+  testWidgets('syncFromDraft restores board values after external load', (
+    tester,
+  ) async {
     await pump(tester);
     await tester.enterText(field('exposure_us'), '7777');
     await tester.pump();

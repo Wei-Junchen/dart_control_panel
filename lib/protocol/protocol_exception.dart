@@ -10,8 +10,9 @@ class ProtocolException implements Exception {
   final Object? cause;
 
   @override
-  String toString() =>
-      cause == null ? 'ProtocolException: $message' : 'ProtocolException: $message ($cause)';
+  String toString() => cause == null
+      ? 'ProtocolException: $message'
+      : 'ProtocolException: $message ($cause)';
 }
 
 /// The request line could not be assembled (too long, bad type, ...).

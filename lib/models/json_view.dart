@@ -16,13 +16,14 @@ class JsonView {
 
   bool get isEmpty => _data?.isEmpty ?? true;
 
-  num? num_(String key) {    final value = _data?[key];
+  num? num_(String key) {
+    final value = _data?[key];
     return value is num ? value : null;
   }
+
   int int_(String key, [int def = 0]) => num_(key)?.toInt() ?? def;
 
-  double dbl(String key, [double def = 0]) =>
-      num_(key)?.toDouble() ?? def;
+  double dbl(String key, [double def = 0]) => num_(key)?.toDouble() ?? def;
 
   bool flag(String key, [bool def = false]) =>
       _data?[key] is bool ? _data![key] as bool : def;
