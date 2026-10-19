@@ -48,7 +48,9 @@ class FlightCsvImporter {
         firstFrame,
         lastFrame,
         firstVisionUs,
-        lastVisionUs;
+        lastVisionUs,
+        previousFrame,
+        previousVisionUs;
     var rows = 0;
     try {
       await for (final line
@@ -118,10 +120,32 @@ class FlightCsvImporter {
           values['vision_mono_us'] ?? values['mono_us']!,
         );
         if (frame != null && frame > 0 && vision != null && vision > 0) {
-          firstFrame ??= frame;
-          firstVisionUs ??= vision;
-          lastFrame = frame;
-          lastVisionUs = vision;
+          if (previousFrame == null) {
+            previousFrame = frame;
+            previousVisionUs = vision;
+          } else if (frame > previousFrame) {
+            // Flight CSVs retain ~1s of telemetry before working_flag=1,
+            // where frame stays at its last value. Anchor to the last row of
+            // that plateau, then time only real frame changes.
+            firstFrame ??= previousFrame;
+            firstVisionUs ??= previousVisionUs;
+            previousFrame = frame;
+            previousVisionUs = vision;
+            lastFrame = frame;
+            lastVisionUs = vision;
+          } else if (frame < previousFrame) {
+            // Counter rollover/reset: estimate fps from the new segment.
+            previousFrame = frame;
+            previousVisionUs = vision;
+            firstFrame = null;
+            firstVisionUs = null;
+            lastFrame = null;
+            lastVisionUs = null;
+          } else {
+            // Repeated frame during a startup/telemetry plateau: keep moving
+            // the anchor so the first interval starts at the real frame edge.
+            previousVisionUs = vision;
+          }
         }
         final elapsed = us - firstUs;
         // Epoch-relative, explicitly NOT a measured flight wall-clock timestamp.

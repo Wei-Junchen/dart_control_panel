@@ -58,6 +58,22 @@ void main() {
       controller.dispose();
     },
   );
+  test('fps ignores the pre-roll plateau before working_flag starts', () async {
+    final source = await raw(
+      'mono_us,frame,vision_mono_us,uart_rx_working_flag\n'
+      '1000000,50,900000,0\n'
+      '1100000,50,1000000,0\n'
+      '1200000,50,1100000,1\n'
+      '1300000,51,1200000,1\n'
+      '1400000,52,1300000,1\n'
+      '1500000,53,1400000,1\n',
+    );
+    final archive = await FlightCsvImporter.importFile(
+      source,
+      Directory('${temp.path}/preroll'),
+    );
+    expect(archive.metadata['estimated_video_fps'], 10);
+  });
   test('rejects time regression and never publishes replay metadata', () async {
     final source = await raw('mono_us,uart_pitch\n20,1\n10,2\n');
     final dir = Directory('${temp.path}/invalid');
