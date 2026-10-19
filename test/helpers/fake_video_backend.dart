@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'package:dart_control_panel/video/video_backend.dart';
+import 'package:dart_control_panel/core/video/video_backend.dart';
 
 /// Scriptable [VideoBackend] for tests — no decoder involved. Emit events
 /// with [emit] / [emitError]; hooks record calls.
