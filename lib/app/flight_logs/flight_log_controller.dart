@@ -352,6 +352,20 @@ class FlightLogController extends ChangeNotifier {
     status = '已无损封装 MP4';
     await refreshLocal();
   });
+
+  /// Uses DART_FFMPEG when set, then an `ffmpeg` binary shipped next to the
+  /// app (Windows release), and finally whatever is on PATH.
+  static String get ffmpegPath {
+    final configured = Platform.environment['DART_FFMPEG']?.trim();
+    if (configured != null && configured.isNotEmpty) return configured;
+    final name = Platform.isWindows ? 'ffmpeg.exe' : 'ffmpeg';
+    final local = File(
+      '${File(Platform.resolvedExecutable).parent.path}'
+      '${Platform.pathSeparator}$name',
+    );
+    return local.existsSync() ? local.path : name;
+  }
+
   static Future<File> remux(File raw, double fps) async {
     if (!fps.isFinite || fps < 1 || fps > 1000) {
       throw ArgumentError('帧率应在1..1000之间');
@@ -364,28 +378,27 @@ class FlightLogController extends ChangeNotifier {
     if (Platform.isAndroid) return AndroidH264Remuxer.convert(raw, fps);
     final temporary = File('${output.path}.part');
     if (await temporary.exists()) await temporary.delete();
-    final process =
-        await Process.start(Platform.environment['DART_FFMPEG'] ?? 'ffmpeg', [
-          '-nostdin',
-          '-hide_banner',
-          '-loglevel',
-          'error',
-          '-n',
-          '-fflags',
-          '+genpts',
-          '-r',
-          '$fps',
-          '-i',
-          raw.path,
-          '-c:v',
-          'copy',
-          '-an',
-          '-movflags',
-          '+faststart',
-          '-f',
-          'mp4',
-          temporary.path,
-        ]);
+    final process = await Process.start(ffmpegPath, [
+      '-nostdin',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-n',
+      '-fflags',
+      '+genpts',
+      '-r',
+      '$fps',
+      '-i',
+      raw.path,
+      '-c:v',
+      'copy',
+      '-an',
+      '-movflags',
+      '+faststart',
+      '-f',
+      'mp4',
+      temporary.path,
+    ]);
     final stderr = process.stderr.transform(utf8.decoder).join();
     final stdout = process.stdout.drain<void>();
     try {

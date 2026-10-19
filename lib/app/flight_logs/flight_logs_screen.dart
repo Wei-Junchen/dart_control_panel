@@ -131,7 +131,7 @@ class _FlightLogsScreenState extends State<FlightLogsScreen> {
   }
 
   Future<void> play(LocalFlightLog log) async {
-    if (Platform.isAndroid && log.mp4 == null && log.file('.h264') != null) {
+    if (log.mp4 == null && log.file('.h264') != null) {
       // Supply explicit timestamps before playback: raw Annex-B has no
       // reliable duration/seek index. Cache a lossless MP4, retain the original.
       await remux(log);
