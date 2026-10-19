@@ -46,7 +46,7 @@
 ### 飞行模式允许的操作
 
 ```text
-get_state, get_config, get_profiles, get_schema, get_logs, heartbeat,
+get_state, get_config, get_profiles, get_schema, get_telemetry_schema, get_logs, heartbeat,
 set_operating_mode, set_flight_active, restart_worker, reboot_board
 ```
 
@@ -108,6 +108,12 @@ reset_tracker
 RTSP 左上角的 `F` 是编码帧 ID，`D` 是本帧使用的识别 ID；画出目标框时二者一定相等。
 `D:0` 是 deadline miss，表示当帧主动放弃 overlay，而不是覆盖过期框。
 
+`worker.vision.profile_us` 是最近一次检测的工作量与耗时：`threshold` 为 LUT
+分类与流式 RLE 扫描总时间，`blob` 为连通域最终归并/过滤时间；
+`coarse_samples/coarse_passes` 表示捕获路径检查的 NV21 2×2 色度块，
+`fine_samples/fine_passes` 表示候选 bbox 精化或局部跟踪检查的像素样本。跟踪命中时
+`coarse_passes=0`；重新捕获帧中可能同时出现 coarse 和 fine pass。
+
 ## 4. RTSP
 
 仅 `ground` 提供 `rtsp://10.149.242.1:8554/live`。进入 `flight` 时播放器应立即释放；
@@ -129,32 +135,21 @@ GET http://<board>:9002/v1/download?path=/recordings/a.h264
 `.part` 并用 `Range: bytes=<size>-` 续传。录像可直接把 download URL 交给 media player。
 该 API 仅暴露 `/logs` 与 `/recordings`，是只读的；Flight 中列表和下载返回 HTTP 423。
 
-## 5. UDP 遥测 / VOFA+
+## 5. UDP 遥测 / TCP 字段发现
 
-板端在两种模式下都由独立线程以固定频率发出 VOFA+ FireWater 文本 UDP：
+当前实时 UDP 是 DVT1 索引二进制；FireWater 仅用于板端本地记录及兼容旧板端。
+TCP `get_telemetry_schema` 返回实际 MCU 注册或配置生效的名称/类型/index、schema_id 和 UART ready 状态。
+此操作为只读，Flight 也允许；不要从 legacy rx_layout 猜测 telemetry_v1 的实际字段。
 
-```text
-目标: 10.149.242.255:1347
-频率: 50 Hz
-编码: ASCII，一次 datagram 对应一个完整样本，以 \n 结尾
-```
+包格式（小端）：`DVT1 | schema_id:u32 | seq:u32 | stream_id:u32 | count:u16 |
+(index:u8 + typed-value)*count | CRC32/IEEE:u32`。最多 26+64 字段，上限 1024 字节。
+UART 原始类型保持；固定板端指标 float64。无 board_id。完整协议见主仓库
+`docs/UDP_TELEMETRY_DVT1.md`。
 
-UDP 包不携带设备身份字段；上位机持续接收端口上的合法 FireWater 样本，不依赖 TCP 会话进行筛选。
-
-示例：
-
-```text
-seq:103,mono_ms:81234.500,frame:9001,found:1,target_x:180,target_y:120,pixels:87,area:240,brightness:73.000,pitch_cmd:0.010000,yaw_cmd:-0.020000,capture_fps:79.900,detect_fps:79.800,process_ms:0.520,exposure_us:999,again:1024,dgain:1024,isp_dgain:1024,luma:7,uart_valid:1,uart_pitch:0.000000,uart_roll:0.000000,uart_yaw:0.000000,air_speed:18.200000
-```
-
-通道名稳定为：`seq`、`mono_ms`、`frame`、`found`、`target_x/y`、`pixels`、`area`、
-`brightness`、`pitch_cmd/yaw_cmd`、`capture_fps/detect_fps/process_ms`、`exposure_us`、
-`again/dgain/isp_dgain`、`luma`、`uart_valid`、`uart_pitch/roll/yaw`、`air_speed`、
-`uart_rx_packets`、`uart_rx_received_ms`。此外，每个 `uart.rx_layout.fields` 字段都会生成
-`uart_rx_<name>` 动态通道；UDP 接收器必须继续保留未知数值通道。
-
-发送线程采用绝对 deadline，仅保存最新样本，不积压旧帧。可用 `seq` 检查丢包，用 `mono_ms`
-进行日志对齐。状态位于 `worker.udp_telemetry`，包含 `running/sent_packets/send_errors/last_send_age_ms`。
+HomeShell 持有 schema loader 和持续运行的 UDP 源。TCP 连接后查询；未知 schema 包先校验 CRC，
+随后限频刷新（1 秒/最多一个请求），立即丢包而不排队。schema 指纹必须匹配，类型、索引、
+长度、CRC 都要验证；同流去重/乱序过滤，序号支持回绕，worker 重启用临时 stream_id 区分。
+不要把接收或查询生命周期放到 Telemetry/Ground Test 页面。
 
 ### UART 接收布局和录制
 
