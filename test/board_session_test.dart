@@ -72,8 +72,9 @@ void main() {
       'rejected mutation surfaces daemon error and refreshes real state',
       () async {
         final daemon = await FixtureDaemon.start((op) async {
-          if (op == 'apply_readout_profile')
+          if (op == 'apply_readout_profile') {
             return fixtures['lifecycle_rejected']!;
+          }
           return fixtures['get_state_ok']!;
         });
         final session = BoardSession(host: '127.0.0.1', port: daemon.port);
