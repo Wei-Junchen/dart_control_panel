@@ -31,7 +31,7 @@ DaemonState _fixtureState({bool rtspOn = true}) {
 
 void main() {
   group('GroundTestScreen', () {
-    testWidgets('video + picture config + tuning render side by side wide', (
+    testWidgets('wide layout keeps video and uses JSON fallback without config schema', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(1280, 800);
@@ -63,12 +63,9 @@ void main() {
       );
       await tester.tap(controlsSegment);
       await tester.pump();
-      expect(find.text('Detector'), findsOneWidget); // tuning section
-      expect(find.text('ISP'), findsOneWidget);
-      // Overlay controls live only in the right-hand Display tuning section;
-      // the picture column must not expose a second immediate-action copy.
-      expect(find.text('overlay'), findsOneWidget);
-      expect(find.text('overlay roi'), findsOneWidget);
+      expect(find.textContaining('板端未提供受支持的 config_schema'), findsOneWidget);
+      expect(find.text('roll sign'), findsNothing);
+      expect(find.text('NV21 green score（唯一识别器）'), findsNothing);
       video.dispose();
       session.disconnect();
     });

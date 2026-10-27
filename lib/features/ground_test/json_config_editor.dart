@@ -1,3 +1,4 @@
+import 'package:dart_control_panel/features/ground_test/config_document_draft.dart';
 import 'dart:convert';
 
 import 'package:file_selector/file_selector.dart';
@@ -153,6 +154,8 @@ class JsonConfigEditor extends StatefulWidget {
     required this.initialConfig,
     required this.onReload,
     required this.onUpload,
+    this.sharedDraft,
+    this.onBusyChanged,
     this.connected = true,
     this.uploadLocked = false,
   });
@@ -160,6 +163,8 @@ class JsonConfigEditor extends StatefulWidget {
   final Map<String, dynamic>? initialConfig;
   final JsonConfigLoader onReload;
   final JsonConfigUploader onUpload;
+  final ConfigDocumentDraft? sharedDraft;
+  final ValueChanged<bool>? onBusyChanged;
   final bool connected;
   final bool uploadLocked;
 
@@ -183,13 +188,24 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
   void initState() {
     super.initState();
     final config = widget.initialConfig;
-    if (config != null) _replaceWith(config);
+    if (widget.sharedDraft != null) {
+      _syncShared();
+      widget.sharedDraft!.addListener(_syncShared);
+    } else if (config != null) {
+      _replaceWith(config);
+    }
   }
 
   @override
   void didUpdateWidget(covariant JsonConfigEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(widget.initialConfig, oldWidget.initialConfig) &&
+    if (!identical(widget.sharedDraft, oldWidget.sharedDraft)) {
+      oldWidget.sharedDraft?.removeListener(_syncShared);
+      widget.sharedDraft?.addListener(_syncShared);
+      _syncShared();
+    }
+    if (widget.sharedDraft == null &&
+        !identical(widget.initialConfig, oldWidget.initialConfig) &&
         widget.initialConfig != null) {
       _replaceWith(widget.initialConfig!);
     }
@@ -197,20 +213,43 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
 
   @override
   void dispose() {
+    widget.sharedDraft?.removeListener(_syncShared);
     _controller.dispose();
     super.dispose();
   }
 
+  void _syncShared() {
+    final draft = widget.sharedDraft;
+    if (draft == null) return;
+    if (_controller.text != draft.text) _controller.text = draft.text;
+    _dirty = draft.dirty;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> uploadCurrent() async {
+    final parsed = parseBoardConfigJson(_controller.text);
+    if (!parsed.valid ||
+        _busy ||
+        !widget.connected ||
+        widget.uploadLocked ||
+        (widget.sharedDraft?.validate().isNotEmpty ?? false)) {
+      return;
+    }
+    await _upload(parsed.config!);
+  }
+
   void _replaceWith(Map<String, dynamic> config, {String message = ''}) {
+    widget.sharedDraft?.load(config);
     _controller.text = _pretty.convert(config);
     _dirty = false;
     _operationMessage = message;
     _operationError = false;
   }
 
-  void _onChanged(String _) {
+  void _onChanged(String source) {
+    widget.sharedDraft?.editJson(source);
     setState(() {
-      _dirty = true;
+      _dirty = widget.sharedDraft?.dirty ?? true;
       _operationMessage = '';
       _operationError = false;
     });
@@ -219,6 +258,7 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
   Future<void> _reload() async {
     if (_busy || !widget.connected) return;
     setState(() => _busy = true);
+    widget.onBusyChanged?.call(true);
     try {
       final config = await widget.onReload();
       if (!mounted) return;
@@ -230,7 +270,10 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
         _operationError = true;
       });
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        widget.onBusyChanged?.call(false);
+      }
     }
   }
 
@@ -251,6 +294,7 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
         _operationMessage = 'Opened ${file.name}';
         _operationError = false;
       });
+      widget.sharedDraft?.editJson(source);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -269,6 +313,7 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
       _operationMessage = 'Formatted locally';
       _operationError = false;
     });
+    widget.sharedDraft?.editJson(_controller.text);
   }
 
   Future<void> _copy() async {
@@ -307,6 +352,7 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
     if (confirmed != true || !mounted) return;
 
     setState(() => _busy = true);
+    widget.onBusyChanged?.call(true);
     try {
       final stored = await widget.onUpload(config);
       if (!mounted) return;
@@ -323,7 +369,10 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
         _operationError = true;
       });
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        widget.onBusyChanged?.call(false);
+      }
     }
   }
 
@@ -332,15 +381,22 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final parsed = parseBoardConfigJson(_controller.text);
+    final schemaErrors =
+        widget.sharedDraft?.validate() ?? const <String, String>{};
+    final valid = parsed.valid && schemaErrors.isEmpty;
+    final validationMessage = parsed.valid
+        ? schemaErrors.entries.map((e) => '${e.key}: ${e.value}').join('; ')
+        : parsed.error;
     final source = _controller.text;
     final lines = source.isEmpty ? 0 : '\n'.allMatches(source).length + 1;
     final bytes = utf8.encode(source).length;
     final canUpload =
-        parsed.valid &&
+        valid &&
         widget.connected &&
         !widget.uploadLocked &&
         !_busy &&
-        _dirty;
+        _dirty &&
+        !(widget.sharedDraft?.validate().isNotEmpty ?? false);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -371,7 +427,7 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
                       child: TextField(
                         key: const ValueKey('json-config-source'),
                         controller: _controller,
-                        enabled: !_busy,
+                        enabled: !_busy && !(widget.sharedDraft?.busy ?? false),
                         expands: true,
                         minLines: null,
                         maxLines: null,
@@ -415,11 +471,9 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
                 child: Row(
                   children: [
                     Icon(
-                      parsed.valid
-                          ? Icons.check_circle_outline
-                          : Icons.error_outline,
+                      valid ? Icons.check_circle_outline : Icons.error_outline,
                       size: 16,
-                      color: parsed.valid
+                      color: valid
                           ? const Color(0xFF5EEAD4)
                           : const Color(0xFFFCA5A5),
                     ),
@@ -428,9 +482,9 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
                       child: Text(
                         _operationMessage.isNotEmpty
                             ? _operationMessage
-                            : parsed.valid
+                            : valid
                             ? 'Valid JSON object'
-                            : parsed.error,
+                            : validationMessage,
                         key: const ValueKey('json-config-status'),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,

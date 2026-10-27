@@ -4,11 +4,11 @@ import 'package:dart_control_panel/core/board/session/board_session.dart';
 import 'package:dart_control_panel/core/video/video_controller.dart';
 import 'package:dart_control_panel/core/board/models/daemon_state.dart';
 import 'package:dart_control_panel/core/board/models/profile.dart';
-import 'package:dart_control_panel/features/ground_test/runtime_draft.dart';
+import 'package:dart_control_panel/features/ground_test/config_document_draft.dart';
 import 'package:dart_control_panel/shared/widgets/connection_bar.dart';
 import 'package:dart_control_panel/features/ground_test/json_config_editor.dart';
 import 'package:dart_control_panel/shared/widgets/metric_card.dart';
-import 'package:dart_control_panel/features/ground_test/tuning_form.dart';
+import 'package:dart_control_panel/features/ground_test/config_controls.dart';
 import 'package:dart_control_panel/core/video/video_panel.dart';
 
 /// 地面测试页：左侧实时 RTSP 画面 + 画面配置（readout profile /
@@ -35,8 +35,9 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
   late final VideoController _video =
       widget.videoController ?? VideoController(liveStream: true);
 
-  final GlobalKey<TuningFormState> _formKey = GlobalKey<TuningFormState>();
-  final RuntimeDraft _draft = RuntimeDraft();
+  final _jsonKey = GlobalKey<JsonConfigEditorState>();
+  final _configDraft = ConfigDocumentDraft();
+  int _configGeneration = 0;
   bool _tuningBusy = false;
   bool _loaded = false;
   bool _tuningLoaded = false;
@@ -60,6 +61,7 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
   @override
   void dispose() {
     _session.removeListener(_onSessionChanged);
+    _configDraft.dispose();
     _video.dispose();
     super.dispose();
   }
@@ -74,6 +76,8 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
       _profiles = const {};
       _selectedProfile = null;
       _boardConfig = null;
+      _configGeneration++;
+      _configDraft.clear();
     }
     if (session.state == null) return;
     if (!_loaded) {
@@ -93,6 +97,7 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
   Future<void> _loadProfiles(BoardSession session) async {
     final repo = session.repository;
     if (repo == null) return;
+    final generation = _configGeneration;
     try {
       final results = await Future.wait([repo.getProfiles(), repo.getConfig()]);
       final profiles = results[0] as Map<String, Profile>;
@@ -100,18 +105,26 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
       final launcher = config['launcher'] is Map
           ? Map<String, dynamic>.from(config['launcher'] as Map)
           : const <String, dynamic>{};
+      final sensor = config['sensor'] is Map
+          ? Map<String, dynamic>.from(config['sensor'] as Map)
+          : const <String, dynamic>{};
+      final readout = sensor['readout'] ?? launcher['readout'];
       final view = config['view'] is Map
           ? Map<String, dynamic>.from(config['view'] as Map)
           : const <String, dynamic>{};
       final configured = profiles.entries
           .where(
             (entry) =>
-                entry.value.readout == launcher['readout'] &&
+                entry.value.readout == readout &&
                 entry.value.view == view['profile'],
           )
           .map((entry) => entry.key)
           .firstOrNull;
-      if (!mounted) return;
+      if (!mounted ||
+          generation != _configGeneration ||
+          !identical(repo, session.repository)) {
+        return;
+      }
       setState(() {
         _profiles = profiles;
         _boardConfig = config;
@@ -127,55 +140,96 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
   }
 
   Future<void> _loadTuning(BoardSession session) async {
-    final repo = session.repository;
-    if (repo == null) return;
     try {
-      final state = await repo.getState();
-      _draft.loadFrom(state);
-      _formKey.currentState?.syncFromDraft();
+      await _reloadJsonConfig(confirm: false);
     } catch (e) {
-      session.setStatus('tuning load failed: $e', error: true);
+      if (mounted) {
+        session.setStatus('Configuration load failed: $e', error: true);
+      }
     }
   }
 
-  Future<void> _applyTuning() async {
-    final session = _session;
-    if (!session.connected) return;
-    if (session.state?.imageSettingsLocked ?? false) {
-      session.setStatus('Flight 模式已锁定画面设置', error: true);
+  void _setConfigBusy(bool value) {
+    if (!mounted) return;
+    setState(() {
+      _tuningBusy = value;
+      _configDraft.busy = value;
+    });
+  }
+
+  Future<void> _applyConfigRuntime() async {
+    final repo = _session.repository;
+    final args = _configDraft.runtimeArgs;
+    final generation = _configGeneration;
+    if (repo == null ||
+        args == null ||
+        args.isEmpty ||
+        _tuningBusy ||
+        _session.busy ||
+        (_session.state?.imageSettingsLocked ?? true) ||
+        _configDraft.validate().isNotEmpty) {
       return;
     }
-    final errors = _draft.validate();
-    if (errors.isNotEmpty) {
-      session.setStatus(
-        'Cannot apply: ${errors.values.join('; ')}',
-        error: true,
-      );
-      return;
-    }
-    setState(() => _tuningBusy = true);
+    _setConfigBusy(true);
     try {
-      final args = _draft.toArgs();
-      final result = await session.mutate('apply_runtime', (repo) async {
-        final r = await repo.applyRuntime(args);
-        return r;
-      });
-      _draft.loadFrom(result.state);
-      _formKey.currentState?.syncFromDraft();
-      session.setStatus(
-        'Applied: ${result.message.isEmpty ? '${args.length} field(s)' : result.message}',
-      );
+      await _session.mutate('apply_runtime', (_) => repo.applyRuntime(args));
+      final stored = await repo.getConfig();
+      if (!mounted ||
+          generation != _configGeneration ||
+          !identical(repo, _session.repository)) {
+        return;
+      }
+      _configDraft.load(stored);
+      setState(() => _boardConfig = stored);
+      _session.setStatus('已实时应用 ${args.length} 个字段，无需重启 worker');
     } catch (_) {
+      /* Keep the user's draft on rejection. Session refreshes state. */
     } finally {
-      if (mounted) setState(() => _tuningBusy = false);
+      _setConfigBusy(false);
     }
   }
 
-  Future<Map<String, dynamic>> _reloadJsonConfig() async {
+  Future<Map<String, dynamic>> _reloadJsonConfig({bool confirm = true}) async {
     final repo = _session.repository;
     if (repo == null) throw StateError('board is not connected');
+    if (confirm && _configDraft.dirty) {
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('放弃未上传的配置修改？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('重新读取'),
+            ),
+          ],
+        ),
+      );
+      if (discard != true) throw StateError('已取消，保留本地草稿');
+    }
+    final generation = _configGeneration;
     final config = await repo.getConfig();
-    if (mounted) setState(() => _boardConfig = config);
+    Map<String, dynamic>? schema;
+    try {
+      final contract = await repo.getSchema();
+      if (contract['config_schema'] is Map) {
+        schema = Map<String, dynamic>.from(contract['config_schema'] as Map);
+      }
+    } catch (_) {
+      /* Old boards retain the JSON-only editing path. */
+    }
+    if (!mounted ||
+        generation != _configGeneration ||
+        !identical(repo, _session.repository)) {
+      throw StateError('连接已变化，忽略过期配置');
+    }
+    _configDraft.setSchema(schema);
+    _configDraft.load(config, preserveEdits: !confirm);
+    setState(() => _boardConfig = config);
     return config;
   }
 
@@ -186,18 +240,27 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
     if (session.state?.imageSettingsLocked ?? false) {
       throw StateError('Flight mode locks image configuration');
     }
-    if (session.repository == null) throw StateError('board is not connected');
+    final repo = session.repository;
+    final generation = _configGeneration;
+    if (repo == null) throw StateError('board is not connected');
 
     await session.mutate(
       'set_config',
       (repo) => repo.setConfig(Map<String, dynamic>.from(config)),
     );
-    final stored = await session.repository!.getConfig();
-    final state = session.state;
-    if (state != null) {
-      _draft.loadFrom(state);
-      _formKey.currentState?.syncFromDraft();
+    if (!mounted ||
+        generation != _configGeneration ||
+        !identical(repo, session.repository)) {
+      throw StateError('连接已变化，忽略旧连接的上传结果');
     }
+    final stored = await repo.getConfig();
+    if (!mounted ||
+        generation != _configGeneration ||
+        !identical(repo, session.repository)) {
+      throw StateError('连接已变化，忽略旧连接的上传结果');
+    }
+    final state = session.state;
+    _configDraft.load(stored);
     if (mounted) {
       setState(() {
         _boardConfig = stored;
@@ -207,12 +270,6 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
     }
     session.setStatus('Configuration uploaded and verified by daemon');
     return stored;
-  }
-
-  void _revertTuning() {
-    _draft.revert();
-    _formKey.currentState?.syncFromDraft();
-    _session.setStatus('Reverted local edits');
   }
 
   Future<void> _mutate(
@@ -225,9 +282,18 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
       session.setStatus('Flight 模式已锁定画面设置', error: true);
       return;
     }
+    if (_configDraft.dirty) {
+      session.setStatus('存在未上传的配置草稿，请先上传或撤销，再使用画面快捷操作。', error: true);
+      return;
+    }
+    _setConfigBusy(true);
     try {
       await session.mutate(label, (repo) async => op(session));
-    } catch (_) {}
+      await _reloadJsonConfig(confirm: false);
+    } catch (_) {
+    } finally {
+      _setConfigBusy(false);
+    }
   }
 
   @override
@@ -471,7 +537,7 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
                       Text(
                         _configurationView == _ConfigurationView.json
                             ? 'Edit the complete validated board configuration'
-                            : 'Quick controls for live detector and ISP tuning',
+                            : '根据板端 schema 生成，与 JSON 共用草稿',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -497,6 +563,7 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
                   ],
                   selected: {_configurationView},
                   onSelectionChanged: (selection) {
+                    FocusScope.of(context).unfocus();
                     setState(() => _configurationView = selection.first);
                   },
                 ),
@@ -508,20 +575,34 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
               index: _configurationView.index,
               children: [
                 JsonConfigEditor(
+                  key: _jsonKey,
+                  sharedDraft: _configDraft,
+                  onBusyChanged: _setConfigBusy,
                   initialConfig: _boardConfig,
                   connected: _session.repository != null,
-                  uploadLocked: state.imageSettingsLocked || _session.busy,
+                  uploadLocked:
+                      state.imageSettingsLocked || _session.busy || _tuningBusy,
                   onReload: _reloadJsonConfig,
                   onUpload: _uploadJsonConfig,
                 ),
-                TuningForm(
-                  key: _formKey,
-                  draft: _draft,
-                  busy: _tuningBusy,
-                  locked: state.imageSettingsLocked,
-                  onApply: _applyTuning,
-                  onRevert: _revertTuning,
-                  onReload: () => _loadTuning(_session),
+                ConfigControls(
+                  key: ValueKey(_configGeneration),
+                  draft: _configDraft,
+                  onLiveApply: _applyConfigRuntime,
+                  locked: state.imageSettingsLocked || _session.busy,
+                  onApply: () => _jsonKey.currentState?.uploadCurrent(),
+                  onReload: () async {
+                    _setConfigBusy(true);
+                    try {
+                      await _reloadJsonConfig();
+                    } catch (e) {
+                      if (mounted) {
+                        _session.setStatus('Reload failed: $e', error: true);
+                      }
+                    } finally {
+                      _setConfigBusy(false);
+                    }
+                  },
                 ),
               ],
             ),

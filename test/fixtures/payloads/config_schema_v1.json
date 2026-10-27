@@ -1,0 +1,816 @@
+{
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "default": {
+      "control": {
+        "cx": -1.0,
+        "cy": -1.0,
+        "distance": 0.0,
+        "fx": 277.0,
+        "fy": 277.0,
+        "mode": "angle_rad"
+      },
+      "detector": {
+        "area_threshold": 1,
+        "enabled": true,
+        "every_n": 1,
+        "green_g_min": 50,
+        "green_gb_min": 20,
+        "green_rg_min": 20,
+        "green_score_min": 60,
+        "green_y_min": 20,
+        "mode": "nv21_green",
+        "pixels_threshold": 1,
+        "roi": "auto",
+        "search_radius": 20,
+        "x_stride": 1,
+        "y_stride": 1
+      },
+      "isp": {
+        "adaptive_tone": false,
+        "again": 1024,
+        "awb_auto": false,
+        "dgain": 1024,
+        "exposure_us": 1000,
+        "isp_dgain": 1024,
+        "wb_gain": [
+          2036,
+          1024,
+          1024,
+          2111
+        ]
+      },
+      "overlay": {
+        "draw_roi": true,
+        "enabled": true
+      },
+      "record": {
+        "bitrate_kbps": 6000,
+        "every_n": 1,
+        "gop": 30,
+        "shared_channel": true
+      },
+      "sensor": {
+        "readout": "full_1280x720_80"
+      },
+      "uart": {
+        "baud": 921600,
+        "enabled": true
+      },
+      "udp": {
+        "enabled": true,
+        "host": "auto",
+        "port": 1347
+      },
+      "view": {
+        "crop_offset_x": 0,
+        "crop_offset_y": 0,
+        "profile": "wide_640x360",
+        "rotation": 90
+      }
+    },
+    "properties": {
+      "control": {
+        "additionalProperties": false,
+        "default": {
+          "cx": -1.0,
+          "cy": -1.0,
+          "distance": 0.0,
+          "fx": 277.0,
+          "fy": 277.0,
+          "mode": "angle_rad"
+        },
+        "properties": {
+          "cx": {
+            "default": -1.0,
+            "description": "输出画面像素坐标；-1 使用该轴几何中心",
+            "oneOf": [
+              {
+                "const": -1
+              },
+              {
+                "maximum": 1000000,
+                "minimum": 0
+              }
+            ],
+            "type": "number",
+            "x-runtime-key": "cx",
+            "x-unit": "px"
+          },
+          "cy": {
+            "default": -1.0,
+            "description": "输出画面像素坐标；-1 使用该轴几何中心",
+            "oneOf": [
+              {
+                "const": -1
+              },
+              {
+                "maximum": 1000000,
+                "minimum": 0
+              }
+            ],
+            "type": "number",
+            "x-runtime-key": "cy",
+            "x-unit": "px"
+          },
+          "distance": {
+            "default": 0.0,
+            "type": "number",
+            "x-runtime-key": "distance"
+          },
+          "fx": {
+            "default": 277.0,
+            "exclusiveMinimum": 0,
+            "type": "number",
+            "x-runtime-key": "fx"
+          },
+          "fy": {
+            "default": 277.0,
+            "exclusiveMinimum": 0,
+            "type": "number",
+            "x-runtime-key": "fy"
+          },
+          "mode": {
+            "default": "angle_rad",
+            "enum": [
+              "angle_rad",
+              "pixel"
+            ],
+            "type": "string",
+            "x-runtime-key": "control_mode"
+          }
+        },
+        "required": [
+          "distance",
+          "fx",
+          "fy",
+          "mode"
+        ],
+        "title": "观测角与主点",
+        "type": "object"
+      },
+      "detector": {
+        "additionalProperties": false,
+        "default": {
+          "area_threshold": 1,
+          "enabled": true,
+          "every_n": 1,
+          "green_g_min": 50,
+          "green_gb_min": 20,
+          "green_rg_min": 20,
+          "green_score_min": 60,
+          "green_y_min": 20,
+          "mode": "nv21_green",
+          "pixels_threshold": 1,
+          "roi": "auto",
+          "search_radius": 20,
+          "x_stride": 1,
+          "y_stride": 1
+        },
+        "properties": {
+          "area_threshold": {
+            "default": 1,
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "type": "integer",
+            "x-runtime-key": "area_threshold"
+          },
+          "ellipse_max_axis_ratio": {
+            "default": 2.0,
+            "maximum": 2.0,
+            "minimum": 1.0,
+            "type": "number",
+            "x-runtime-key": "ellipse_max_axis_ratio",
+            "x-visible-if": {
+              "equals": "luma_ellipse",
+              "path": "detector.mode"
+            }
+          },
+          "ellipse_min_iou": {
+            "default": 0.9,
+            "exclusiveMinimum": 0,
+            "maximum": 1.0,
+            "type": "number",
+            "x-runtime-key": "ellipse_min_iou",
+            "x-visible-if": {
+              "equals": "luma_ellipse",
+              "path": "detector.mode"
+            }
+          },
+          "ellipse_min_pixels": {
+            "default": 9,
+            "maximum": 1000000.0,
+            "minimum": 9.0,
+            "type": "integer",
+            "x-runtime-key": "ellipse_min_pixels",
+            "x-visible-if": {
+              "equals": "luma_ellipse",
+              "path": "detector.mode"
+            }
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "every_n": {
+            "default": 1,
+            "maximum": 120.0,
+            "minimum": 1.0,
+            "type": "integer",
+            "x-runtime-key": "detect_every_n"
+          },
+          "green_g_min": {
+            "default": 50,
+            "maximum": 255.0,
+            "minimum": 0.0,
+            "type": "integer",
+            "x-runtime-key": "green_g_min",
+            "x-visible-if": {
+              "equals": "nv21_green",
+              "path": "detector.mode"
+            }
+          },
+          "green_gb_min": {
+            "default": 20,
+            "maximum": 255.0,
+            "minimum": -255.0,
+            "type": "integer",
+            "x-runtime-key": "green_gb_min",
+            "x-visible-if": {
+              "equals": "nv21_green",
+              "path": "detector.mode"
+            }
+          },
+          "green_rg_min": {
+            "default": 20,
+            "maximum": 255.0,
+            "minimum": -255.0,
+            "type": "integer",
+            "x-runtime-key": "green_rg_min",
+            "x-visible-if": {
+              "equals": "nv21_green",
+              "path": "detector.mode"
+            }
+          },
+          "green_score_min": {
+            "default": 60,
+            "maximum": 510.0,
+            "minimum": -510.0,
+            "type": "integer",
+            "x-runtime-key": "green_score_min",
+            "x-visible-if": {
+              "equals": "nv21_green",
+              "path": "detector.mode"
+            }
+          },
+          "green_y_min": {
+            "default": 20,
+            "maximum": 255.0,
+            "minimum": 0.0,
+            "type": "integer",
+            "x-runtime-key": "green_y_min",
+            "x-visible-if": {
+              "equals": "nv21_green",
+              "path": "detector.mode"
+            }
+          },
+          "luma_threshold": {
+            "default": 80,
+            "maximum": 255.0,
+            "minimum": 0.0,
+            "type": "integer",
+            "x-runtime-key": "luma_threshold",
+            "x-visible-if": {
+              "equals": "luma_ellipse",
+              "path": "detector.mode"
+            }
+          },
+          "mode": {
+            "default": "nv21_green",
+            "enum": [
+              "nv21_green",
+              "luma_ellipse"
+            ],
+            "type": "string",
+            "x-runtime-key": "detector_mode"
+          },
+          "pixels_threshold": {
+            "default": 1,
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "type": "integer",
+            "x-runtime-key": "pixels_threshold"
+          },
+          "roi": {
+            "default": "auto",
+            "description": "auto：跟随画面预设；full/null：全屏；或 [x,y,w,h]，须位于输出画面内",
+            "oneOf": [
+              {
+                "enum": [
+                  "auto",
+                  "full",
+                  null
+                ]
+              },
+              {
+                "items": {
+                  "maximum": 2147483647,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "maxItems": 4,
+                "minItems": 4,
+                "type": "array"
+              }
+            ],
+            "x-control": "json"
+          },
+          "search_radius": {
+            "default": 20,
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "type": "integer",
+            "x-runtime-key": "search_radius"
+          },
+          "x_stride": {
+            "default": 1,
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "type": "integer",
+            "x-runtime-key": "x_stride"
+          },
+          "y_stride": {
+            "default": 1,
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "type": "integer",
+            "x-runtime-key": "y_stride"
+          }
+        },
+        "required": [
+          "area_threshold",
+          "enabled",
+          "every_n",
+          "green_g_min",
+          "green_gb_min",
+          "green_rg_min",
+          "green_score_min",
+          "green_y_min",
+          "pixels_threshold",
+          "roi",
+          "search_radius",
+          "x_stride",
+          "y_stride"
+        ],
+        "title": "目标识别",
+        "type": "object"
+      },
+      "isp": {
+        "additionalProperties": false,
+        "default": {
+          "adaptive_tone": false,
+          "again": 1024,
+          "awb_auto": false,
+          "dgain": 1024,
+          "exposure_us": 1000,
+          "isp_dgain": 1024,
+          "wb_gain": [
+            2036,
+            1024,
+            1024,
+            2111
+          ]
+        },
+        "properties": {
+          "adaptive_tone": {
+            "default": false,
+            "type": "boolean",
+            "x-runtime-key": "isp_adaptive_tone"
+          },
+          "again": {
+            "default": 1024,
+            "description": "0 自动，1024=1倍；非零增益要求 exposure_us > 0",
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "oneOf": [
+              {
+                "const": 0
+              },
+              {
+                "maximum": 262144,
+                "minimum": 1024
+              }
+            ],
+            "type": "integer",
+            "x-runtime-key": "again"
+          },
+          "awb_auto": {
+            "default": false,
+            "type": "boolean",
+            "x-runtime-key": "awb_auto"
+          },
+          "dgain": {
+            "default": 1024,
+            "description": "0 自动，1024=1倍；非零增益要求 exposure_us > 0",
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "oneOf": [
+              {
+                "const": 0
+              },
+              {
+                "maximum": 262144,
+                "minimum": 1024
+              }
+            ],
+            "type": "integer",
+            "x-runtime-key": "dgain"
+          },
+          "exposure_us": {
+            "default": 1000,
+            "description": "0 自动曝光",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "type": "integer",
+            "x-runtime-key": "exposure_us",
+            "x-unit": "us"
+          },
+          "isp_dgain": {
+            "default": 1024,
+            "description": "0 自动，1024=1倍；非零增益要求 exposure_us > 0",
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "oneOf": [
+              {
+                "const": 0
+              },
+              {
+                "maximum": 262144,
+                "minimum": 1024
+              }
+            ],
+            "type": "integer",
+            "x-runtime-key": "isp_dgain"
+          },
+          "wb_gain": {
+            "default": [
+              2036,
+              1024,
+              1024,
+              2111
+            ],
+            "description": "四通道白平衡增益数组",
+            "items": {
+              "maximum": 16383,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
+          }
+        },
+        "required": [
+          "adaptive_tone",
+          "again",
+          "awb_auto",
+          "dgain",
+          "exposure_us",
+          "isp_dgain",
+          "wb_gain"
+        ],
+        "title": "曝光与白平衡",
+        "type": "object"
+      },
+      "launcher": {
+        "additionalProperties": false,
+        "default": {
+          "operating_mode": "flight"
+        },
+        "properties": {
+          "operating_mode": {
+            "default": "flight",
+            "enum": [
+              "ground",
+              "flight"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "operating_mode"
+        ],
+        "type": "object",
+        "x-hidden": true
+      },
+      "overlay": {
+        "additionalProperties": false,
+        "default": {
+          "draw_roi": true,
+          "enabled": true
+        },
+        "properties": {
+          "draw_roi": {
+            "default": true,
+            "type": "boolean",
+            "x-runtime-key": "overlay_roi"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean",
+            "x-runtime-key": "overlay"
+          }
+        },
+        "required": [
+          "draw_roi",
+          "enabled"
+        ],
+        "title": "画面叠加",
+        "type": "object"
+      },
+      "record": {
+        "additionalProperties": false,
+        "default": {
+          "bitrate_kbps": 6000,
+          "every_n": 1,
+          "gop": 30,
+          "shared_channel": true
+        },
+        "properties": {
+          "bitrate_kbps": {
+            "default": 6000,
+            "maximum": 2147483647.0,
+            "minimum": 64.0,
+            "type": "integer"
+          },
+          "every_n": {
+            "default": 1,
+            "maximum": 120.0,
+            "minimum": 1.0,
+            "type": "integer"
+          },
+          "gop": {
+            "default": 30,
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "type": "integer"
+          },
+          "shared_channel": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bitrate_kbps",
+          "every_n",
+          "gop",
+          "shared_channel"
+        ],
+        "title": "录像",
+        "type": "object"
+      },
+      "sensor": {
+        "additionalProperties": false,
+        "default": {
+          "readout": "full_1280x720_80"
+        },
+        "properties": {
+          "readout": {
+            "default": "full_1280x720_80",
+            "enum": [
+              "experimental_640x360_120",
+              "fast_1280x360_120",
+              "fast_1280x360_150",
+              "fast_1280x360_154",
+              "full_1280x720_80"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "readout"
+        ],
+        "title": "传感器",
+        "type": "object"
+      },
+      "uart": {
+        "additionalProperties": false,
+        "default": {
+          "baud": 921600,
+          "enabled": true
+        },
+        "properties": {
+          "baud": {
+            "default": 921600,
+            "maximum": 2147483647.0,
+            "minimum": 1200.0,
+            "type": "integer"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "baud",
+          "enabled"
+        ],
+        "title": "串口",
+        "type": "object"
+      },
+      "udp": {
+        "additionalProperties": false,
+        "default": {
+          "enabled": true,
+          "host": "auto",
+          "port": 1347
+        },
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "host": {
+            "default": "auto",
+            "type": "string"
+          },
+          "port": {
+            "default": 1347,
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "host",
+          "port"
+        ],
+        "title": "UDP 回传",
+        "type": "object"
+      },
+      "view": {
+        "additionalProperties": false,
+        "default": {
+          "crop_offset_x": 0,
+          "crop_offset_y": 0,
+          "profile": "wide_640x360",
+          "rotation": 90
+        },
+        "properties": {
+          "crop_offset_x": {
+            "default": 0,
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "crop_offset_y": {
+            "default": 0,
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "profile": {
+            "default": "wide_640x360",
+            "enum": [
+              "landscape_360x240",
+              "square_240",
+              "square_360",
+              "wide_640x360"
+            ],
+            "type": "string"
+          },
+          "rotation": {
+            "default": 90,
+            "enum": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "crop_offset_x",
+          "crop_offset_y",
+          "profile",
+          "rotation"
+        ],
+        "title": "画面",
+        "type": "object"
+      }
+    },
+    "required": [
+      "control",
+      "detector",
+      "isp",
+      "overlay",
+      "record",
+      "sensor",
+      "uart",
+      "udp",
+      "view"
+    ],
+    "title": "板端配置",
+    "type": "object",
+    "x-apply": {
+      "ground_only": true,
+      "may_restart_worker": true,
+      "op": "set_config",
+      "runtime_op": "apply_runtime"
+    },
+    "x-contract-version": 1,
+    "x-order": [
+      "sensor",
+      "view",
+      "detector",
+      "control",
+      "isp",
+      "overlay",
+      "uart",
+      "udp",
+      "record"
+    ],
+    "x-server-constraints": [
+      "manual gain requires exposure_us > 0",
+      "ROI must fit rotated output",
+      "readout/view/rotation combination must be supported",
+      "udp.host must be nonzero IPv4, auto or auto:<interface>"
+    ]
+  },
+  "config": {
+    "control": {
+      "cx": -1.0,
+      "cy": -1.0,
+      "distance": 0.0,
+      "fx": 277.0,
+      "fy": 277.0,
+      "mode": "angle_rad"
+    },
+    "detector": {
+      "area_threshold": 1,
+      "enabled": true,
+      "every_n": 1,
+      "green_g_min": 50,
+      "green_gb_min": 20,
+      "green_rg_min": 20,
+      "green_score_min": 60,
+      "green_y_min": 20,
+      "mode": "nv21_green",
+      "pixels_threshold": 1,
+      "roi": "auto",
+      "search_radius": 20,
+      "x_stride": 1,
+      "y_stride": 1
+    },
+    "isp": {
+      "adaptive_tone": false,
+      "again": 1024,
+      "awb_auto": false,
+      "dgain": 1024,
+      "exposure_us": 1000,
+      "isp_dgain": 1024,
+      "wb_gain": [
+        2036,
+        1024,
+        1024,
+        2111
+      ]
+    },
+    "launcher": {
+      "operating_mode": "flight"
+    },
+    "overlay": {
+      "draw_roi": true,
+      "enabled": true
+    },
+    "record": {
+      "bitrate_kbps": 6000,
+      "every_n": 1,
+      "gop": 30,
+      "shared_channel": true
+    },
+    "sensor": {
+      "readout": "full_1280x720_80"
+    },
+    "uart": {
+      "baud": 921600,
+      "enabled": true
+    },
+    "udp": {
+      "enabled": true,
+      "host": "auto",
+      "port": 1347
+    },
+    "view": {
+      "crop_offset_x": 0,
+      "crop_offset_y": 0,
+      "profile": "wide_640x360",
+      "rotation": 90
+    }
+  }
+}
