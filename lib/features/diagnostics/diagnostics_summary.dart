@@ -27,6 +27,8 @@ String buildDiagnosticsSummary(
       'restarts=${state.restarts}',
     )
     ..writeln('  last_error=${state.lastError.isEmpty ? '-' : state.lastError}')
+    ..writeln('  worker_error_active=${state.workerError?.active ?? false}')
+    ..writeln('  worker_error=${state.workerError?.details ?? '-'}')
     ..writeln(
       'mode: ${state.mode} image_settings_locked=${state.imageSettingsLocked}',
     )

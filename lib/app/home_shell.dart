@@ -1,3 +1,4 @@
+import 'package:dart_control_panel/shared/widgets/board_error_banner.dart';
 import 'package:dart_control_panel/core/platform/app_paths.dart';
 import 'package:dart_control_panel/core/board/session/auto_board_connector.dart';
 import 'package:dart_control_panel/core/preferences/connection_settings.dart';
@@ -436,6 +437,7 @@ class _HomeShellState extends State<HomeShell> {
           Expanded(
             child: Column(
               children: [
+                BoardErrorBanner(state: _session.state),
                 Expanded(child: page),
                 if (!handset)
                   Padding(
@@ -456,6 +458,7 @@ class _HomeShellState extends State<HomeShell> {
     return Scaffold(
       body: Column(
         children: [
+          BoardErrorBanner(state: _session.state),
           Expanded(child: page),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),

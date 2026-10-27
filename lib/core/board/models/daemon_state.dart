@@ -1,3 +1,4 @@
+import 'package:dart_control_panel/core/board/models/worker_error.dart';
 import 'package:dart_control_panel/core/board/models/json_view.dart';
 import 'package:dart_control_panel/core/board/models/profile.dart';
 
@@ -39,6 +40,8 @@ class DaemonState {
     configRev = p.int_('config_rev');
     lastKnownGood = p.str('last_known_good');
     lastError = p.str('last_error');
+    final failure = p.nested('worker_error');
+    workerError = failure == null ? null : WorkerError(failure);
     configWarning = p.str('config_warning');
     configPath = p.str('config_path');
     expected = p.nested('expected') == null
@@ -77,6 +80,7 @@ class DaemonState {
   late final int configRev;
   late final String lastKnownGood;
   late final String lastError;
+  late final WorkerError? workerError;
   late final String configWarning;
   late final String configPath;
   late final Expected? expected;

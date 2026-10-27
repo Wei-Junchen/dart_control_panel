@@ -97,6 +97,11 @@ class DaemonCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final transitional = state.isTransitional;
+    final error = state.workerError;
+    final currentError =
+        error != null && error.active && error.severity != 'info'
+        ? '${error.title}\n${error.details}'
+        : state.lastError;
     return MetricCard(
       title: 'Daemon',
       trailing: StateBadge(state: state.state),
@@ -134,10 +139,12 @@ class DaemonCard extends StatelessWidget {
           highlight: state.fileService.enabled && !state.fileService.available,
         ),
         StatRow(
-          label: 'last error',
-          value: state.lastError.isEmpty ? '-' : state.lastError,
-          highlight: state.lastError.isNotEmpty,
+          label: '当前异常',
+          value: currentError.isEmpty ? '无' : currentError,
+          highlight: currentError.isNotEmpty,
         ),
+        if (error != null && !error.active && error.severity != 'info')
+          StatRow(label: '历史异常（已恢复）', value: error.title),
         if (transitional)
           const Padding(
             padding: EdgeInsets.only(top: 6),
