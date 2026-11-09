@@ -160,7 +160,7 @@ void main() {
       expect(find.text('Telemetry'), findsWidgets);
       expect(find.text('Ground Test'), findsWidgets);
       expect(find.text('Mode'), findsWidgets);
-      expect(find.text('Logs'), findsWidgets);
+      expect(find.text('Devices'), findsWidgets);
       expect(find.widgetWithText(TextField, 'Port'), findsNothing);
       expect(find.widgetWithText(TextField, 'Board IP'), findsNothing);
       expect(find.text('高级连接'), findsOneWidget);

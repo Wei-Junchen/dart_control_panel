@@ -8,6 +8,7 @@ import 'package:dart_control_panel/features/ground_test/config_document_draft.da
 import 'package:dart_control_panel/shared/widgets/connection_bar.dart';
 import 'package:dart_control_panel/features/ground_test/json_config_editor.dart';
 import 'package:dart_control_panel/shared/widgets/metric_card.dart';
+import 'package:dart_control_panel/shared/widgets/mobile_ui_scale.dart';
 import 'package:dart_control_panel/features/ground_test/config_controls.dart';
 import 'package:dart_control_panel/core/video/video_panel.dart';
 
@@ -44,6 +45,7 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
   Object? _loadedRepository;
   Map<String, dynamic>? _boardConfig;
   _ConfigurationView _configurationView = _ConfigurationView.json;
+  _MobileGroundView _mobileView = _MobileGroundView.preview;
 
   Map<String, Profile> _profiles = const {};
   String? _selectedProfile;
@@ -302,6 +304,9 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
       listenable: _session,
       builder: (context, _) {
         final state = _session.state;
+        final handset = MobileUiScale.isHandset(context);
+        final keyboardVisible =
+            handset && MediaQuery.viewInsetsOf(context).bottom > 0;
         final host = _session.host;
         final url = 'rtsp://$host:8554/live';
         final rtspOk =
@@ -309,18 +314,37 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
             state.features.rtsp &&
             (state.worker?.stream.rtspEnabled ?? false);
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Ground Test'),
-            actions: [
-              if (_session.connection != null)
-                ConnectionStatusChip(connection: _session.connection!),
-              const SizedBox(width: 12),
-            ],
-          ),
+          appBar: keyboardVisible
+              ? null
+              : AppBar(
+                  title: handset && state != null
+                      ? Row(
+                          children: [
+                            const Text('Ground Test'),
+                            const SizedBox(width: 12),
+                            Expanded(child: _mobileViewSelector()),
+                          ],
+                        )
+                      : const Text('Ground Test'),
+                  actions: [
+                    if (_session.connection != null && !handset)
+                      ConnectionStatusChip(connection: _session.connection!),
+                    const SizedBox(width: 12),
+                  ],
+                ),
           body: state == null
               ? _notConnected(context)
               : LayoutBuilder(
                   builder: (context, constraints) {
+                    if (MobileUiScale.isHandset(context)) {
+                      return _mobileWorkspace(
+                        context,
+                        state,
+                        rtspOk,
+                        url,
+                        keyboardVisible,
+                      );
+                    }
                     final wide = constraints.maxWidth >= 1000;
                     final picture = _pictureColumn(context, state, rtspOk, url);
                     final tuning = _configurationWorkspace(context, state);
@@ -328,9 +352,9 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
                         ? Row(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Expanded(flex: 5, child: picture),
+                              Expanded(flex: 7, child: picture),
                               const VerticalDivider(width: 12),
-                              Expanded(flex: 7, child: tuning),
+                              Expanded(flex: 5, child: tuning),
                             ],
                           )
                         : ListView(
@@ -339,14 +363,14 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
                               // controls. A fixed 260 px box clipped/overflowed
                               // those controls on compact windows.
                               SizedBox(
-                                height: constraints.maxHeight
-                                    .clamp(520.0, 700.0)
+                                height: (constraints.maxHeight * 0.78)
+                                    .clamp(480.0, 900.0)
                                     .toDouble(),
                                 child: picture,
                               ),
                               SizedBox(
-                                height: constraints.maxHeight
-                                    .clamp(620.0, 860.0)
+                                height: (constraints.maxHeight * 0.62)
+                                    .clamp(460.0, 760.0)
                                     .toDouble(),
                                 child: tuning,
                               ),
@@ -370,14 +394,94 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
             color: Colors.grey,
           ),
           const SizedBox(height: 8),
-          Text(
-            'Connect once (bottom-left) — 影像 + 调参都在这一页',
-            style: Theme.of(context).textTheme.bodyMedium,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              '请先连接开发板，即可查看画面并调整参数。',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
           ),
         ],
       ),
     );
   }
+
+  Widget _mobileWorkspace(
+    BuildContext context,
+    DaemonState state,
+    bool rtspOk,
+    String url,
+    bool keyboardVisible,
+  ) {
+    return IndexedStack(
+      index: _mobileView.index,
+      children: [
+        _videoPreview(rtspOk, url),
+        ListView(
+          padding: const EdgeInsets.all(8),
+          children: _pictureSettings(context, state),
+        ),
+        _configurationWorkspace(
+          context,
+          state,
+          keyboardVisible: keyboardVisible,
+        ),
+      ],
+    );
+  }
+
+  Widget _mobileViewSelector() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SegmentedButton<_MobileGroundView>(
+        key: const ValueKey('mobile-ground-view-selector'),
+        showSelectedIcon: false,
+        style: SegmentedButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+        ),
+        segments: const [
+          ButtonSegment(
+            value: _MobileGroundView.preview,
+            icon: Icon(Icons.videocam_outlined),
+            label: Text('预览'),
+          ),
+          ButtonSegment(
+            value: _MobileGroundView.picture,
+            icon: Icon(Icons.tune),
+            label: Text('画面设置'),
+          ),
+          ButtonSegment(
+            value: _MobileGroundView.config,
+            icon: Icon(Icons.data_object),
+            label: Text('配置'),
+          ),
+        ],
+        selected: {_mobileView},
+        onSelectionChanged: (selection) {
+          FocusScope.of(context).unfocus();
+          setState(() => _mobileView = selection.first);
+        },
+      ),
+    );
+  }
+
+  Widget _videoPreview(bool rtspOk, String url) => rtspOk
+      ? VideoPanel(
+          controller: _video,
+          rtspAvailable: true,
+          url: url,
+          liveStream: true,
+          onFullscreen: () => showVideoPlaybackDialog(
+            context,
+            controller: _video,
+            url: url,
+            title: '实时画面',
+            liveStream: true,
+          ),
+        )
+      : const RtspUnavailable();
 
   Widget _pictureColumn(
     BuildContext context,
@@ -385,191 +489,206 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
     bool rtspOk,
     String url,
   ) {
-    final locked = state.imageSettingsLocked;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: rtspOk
-              ? VideoPanel(
-                  controller: _video,
-                  rtspAvailable: true,
-                  url: url,
-                  liveStream: true,
-                )
-              : const RtspUnavailable(),
-        ),
+        Expanded(child: _videoPreview(rtspOk, url)),
         const SizedBox(height: 12),
-        if (locked)
-          Card(
-            color: Theme.of(context).colorScheme.errorContainer,
-            child: const Padding(
-              padding: EdgeInsets.all(10),
-              child: Text('Flight 模式：RTSP 已关闭，画面设置已锁定。请在 Mode 页切回 Ground。'),
-            ),
-          ),
-        MetricCard(
-          title: '画面配置',
-          children: [
-            DropdownButtonFormField<String>(
-              key: const ValueKey('readout_profile'),
-              initialValue: _profiles.containsKey(_selectedProfile)
-                  ? _selectedProfile
-                  : null,
-              decoration: const InputDecoration(
-                labelText: 'Readout profile',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              items: [
-                for (final entry in _profiles.entries)
-                  DropdownMenuItem(
-                    value: entry.key,
-                    child: Text(
-                      '${entry.key}  (${entry.value.readout} → ${entry.value.view})',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-              ],
-              onChanged: _session.busy || locked
-                  ? null
-                  : (v) => setState(() => _selectedProfile = v),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                FilledButton.tonal(
-                  onPressed:
-                      _session.busy ||
-                          locked ||
-                          _selectedProfile == null ||
-                          _selectedProfile == state.profile
-                      ? null
-                      : () => _mutate(
-                          'apply_readout_profile',
-                          (s) async => s.repository!.applyReadoutProfile(
-                            _selectedProfile!,
-                          ),
-                        ),
-                  child: const Text('Apply profile'),
-                ),
-                SegmentedButton<int>(
-                  segments: [
-                    for (final degrees in const [0, 90, 180, 270])
-                      ButtonSegment(
-                        value: degrees,
-                        label: Text('$degrees°'),
-                        enabled:
-                            _profiles[_selectedProfile]?.supportedRotations
-                                .contains(degrees) ??
-                            true,
-                      ),
-                  ],
-                  selected: {_rotation},
-                  onSelectionChanged: _session.busy || locked
-                      ? null
-                      : (selection) =>
-                            setState(() => _rotation = selection.first),
-                ),
-                FilledButton.tonal(
-                  onPressed:
-                      _session.busy || locked || _rotation == state.rotation
-                      ? null
-                      : () => _mutate(
-                          'set_rotation',
-                          (s) async => s.repository!.setRotation(_rotation),
-                        ),
-                  child: const Text('Apply rotation'),
-                ),
-              ],
-            ),
-          ],
-        ),
+        ..._pictureSettings(context, state),
       ],
     );
   }
 
-  Widget _configurationWorkspace(BuildContext context, DaemonState state) {
+  List<Widget> _pictureSettings(BuildContext context, DaemonState state) {
+    final locked = state.imageSettingsLocked;
+    return [
+      if (locked)
+        Card(
+          color: Theme.of(context).colorScheme.errorContainer,
+          child: const Padding(
+            padding: EdgeInsets.all(10),
+            child: Text('Flight 模式：RTSP 已关闭，画面设置已锁定。请在 Mode 页切回 Ground。'),
+          ),
+        ),
+      MetricCard(
+        title: '画面配置',
+        children: [
+          DropdownButtonFormField<String>(
+            key: const ValueKey('readout_profile'),
+            initialValue: _profiles.containsKey(_selectedProfile)
+                ? _selectedProfile
+                : null,
+            decoration: const InputDecoration(
+              labelText: 'Readout profile',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            items: [
+              for (final entry in _profiles.entries)
+                DropdownMenuItem(
+                  value: entry.key,
+                  child: Text(
+                    '${entry.key}  (${entry.value.readout} → ${entry.value.view})',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: _session.busy || locked
+                ? null
+                : (v) => setState(() => _selectedProfile = v),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              FilledButton.tonal(
+                onPressed:
+                    _session.busy ||
+                        locked ||
+                        _selectedProfile == null ||
+                        _selectedProfile == state.profile
+                    ? null
+                    : () => _mutate(
+                        'apply_readout_profile',
+                        (s) async => s.repository!.applyReadoutProfile(
+                          _selectedProfile!,
+                        ),
+                      ),
+                child: const Text('Apply profile'),
+              ),
+              SegmentedButton<int>(
+                segments: [
+                  for (final degrees in const [0, 90, 180, 270])
+                    ButtonSegment(
+                      value: degrees,
+                      label: Text('$degrees°'),
+                      enabled:
+                          _profiles[_selectedProfile]?.supportedRotations
+                              .contains(degrees) ??
+                          true,
+                    ),
+                ],
+                selected: {_rotation},
+                onSelectionChanged: _session.busy || locked
+                    ? null
+                    : (selection) =>
+                          setState(() => _rotation = selection.first),
+              ),
+              FilledButton.tonal(
+                onPressed:
+                    _session.busy || locked || _rotation == state.rotation
+                    ? null
+                    : () => _mutate(
+                        'set_rotation',
+                        (s) async => s.repository!.setRotation(_rotation),
+                      ),
+                child: const Text('Apply rotation'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ];
+  }
+
+  Widget _configurationWorkspace(
+    BuildContext context,
+    DaemonState state, {
+    bool keyboardVisible = false,
+  }) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final handset = MobileUiScale.isHandset(context);
     return ColoredBox(
       color: colors.surfaceContainerLowest,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            margin: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  colors.primaryContainer.withValues(alpha: 0.78),
-                  colors.secondaryContainer.withValues(alpha: 0.50),
-                ],
+          if (!keyboardVisible)
+            Container(
+              margin: EdgeInsets.fromLTRB(
+                12,
+                handset ? 4 : 12,
+                12,
+                handset ? 4 : 10,
               ),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: colors.primary.withValues(alpha: 0.18)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: colors.primary.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  child: Icon(Icons.tune_rounded, color: colors.primary),
+              padding: EdgeInsets.symmetric(
+                horizontal: handset ? 8 : 16,
+                vertical: handset ? 0 : 13,
+              ),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    colors.primaryContainer.withValues(alpha: 0.78),
+                    colors.secondaryContainer.withValues(alpha: 0.50),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Configuration Studio',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: colors.primary.withValues(alpha: 0.18),
+                ),
+              ),
+              child: Row(
+                children: [
+                  if (!handset)
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: colors.primary.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(13),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _configurationView == _ConfigurationView.json
-                            ? 'Edit the complete validated board configuration'
-                            : '根据板端 schema 生成，与 JSON 共用草稿',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        ),
+                      child: Icon(Icons.tune_rounded, color: colors.primary),
+                    ),
+                  if (!handset) const SizedBox(width: 12),
+                  if (!handset)
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Configuration Studio',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _configurationView == _ConfigurationView.json
+                                ? 'Edit the complete validated board configuration'
+                                : '根据板端 schema 生成，与 JSON 共用草稿',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  SegmentedButton<_ConfigurationView>(
+                    key: const ValueKey('configuration-view-selector'),
+                    segments: const [
+                      ButtonSegment(
+                        value: _ConfigurationView.json,
+                        icon: Icon(Icons.data_object, size: 18),
+                        label: Text('JSON'),
+                      ),
+                      ButtonSegment(
+                        value: _ConfigurationView.controls,
+                        icon: Icon(Icons.tune, size: 18),
+                        label: Text('Controls'),
                       ),
                     ],
+                    selected: {_configurationView},
+                    onSelectionChanged: (selection) {
+                      FocusScope.of(context).unfocus();
+                      setState(() => _configurationView = selection.first);
+                    },
                   ),
-                ),
-                SegmentedButton<_ConfigurationView>(
-                  key: const ValueKey('configuration-view-selector'),
-                  segments: const [
-                    ButtonSegment(
-                      value: _ConfigurationView.json,
-                      icon: Icon(Icons.data_object, size: 18),
-                      label: Text('JSON'),
-                    ),
-                    ButtonSegment(
-                      value: _ConfigurationView.controls,
-                      icon: Icon(Icons.tune, size: 18),
-                      label: Text('Controls'),
-                    ),
-                  ],
-                  selected: {_configurationView},
-                  onSelectionChanged: (selection) {
-                    FocusScope.of(context).unfocus();
-                    setState(() => _configurationView = selection.first);
-                  },
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           Expanded(
             child: IndexedStack(
               index: _configurationView.index,
@@ -577,6 +696,7 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
                 JsonConfigEditor(
                   key: _jsonKey,
                   sharedDraft: _configDraft,
+                  keyboardCompact: keyboardVisible,
                   onBusyChanged: _setConfigBusy,
                   initialConfig: _boardConfig,
                   connected: _session.repository != null,
@@ -614,3 +734,5 @@ class _GroundTestScreenState extends State<GroundTestScreen> {
 }
 
 enum _ConfigurationView { json, controls }
+
+enum _MobileGroundView { preview, picture, config }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:dart_control_panel/features/ground_test/json_config_editor.dart';
+import 'package:dart_control_panel/shared/widgets/mobile_ui_scale.dart';
+import 'package:dart_control_panel/features/ground_test/config_document_draft.dart';
 
 void main() {
   group('parseBoardConfigJson', () {
@@ -94,6 +96,55 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('BOARD COPY'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('handset columns edit and upload one continuous document', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 363);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final draft = ConfigDocumentDraft()
+      ..load({'first': 1, 'second': 2, 'third': 3});
+    addTearDown(draft.dispose);
+    Map<String, dynamic>? uploaded;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.android),
+        builder: (context, child) => MobileUiScale(child: child!),
+        home: Scaffold(
+          body: JsonConfigEditor(
+            sharedDraft: draft,
+            initialConfig: null,
+            onReload: () async => {},
+            onUpload: (config) async {
+              uploaded = config;
+              return config;
+            },
+          ),
+        ),
+      ),
+    );
+    final left = find.byKey(const ValueKey('json-config-source'));
+    final right = find.byKey(const ValueKey('json-config-source-right'));
+    expect(right, findsOneWidget);
+    final originalLeft = tester.widget<TextField>(left).controller!.text;
+    final originalRight = tester.widget<TextField>(right).controller!.text;
+    expect(originalLeft + originalRight, draft.text);
+    await tester.enterText(left, originalLeft.replaceFirst('1', '10'));
+    await tester.enterText(right, originalRight.replaceFirst('3', '30'));
+    await tester.pump();
+    expect(draft.document, {'first': 10, 'second': 2, 'third': 30});
+    expect(
+      tester.widget<TextField>(left).controller!.text,
+      originalLeft.replaceFirst('1', '10'),
+    );
+    await tester.tap(find.byKey(const ValueKey('upload-json-config')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm-json-upload')));
+    await tester.pumpAndSettle();
+    expect(uploaded, {'first': 10, 'second': 2, 'third': 30});
     expect(tester.takeException(), isNull);
   });
 

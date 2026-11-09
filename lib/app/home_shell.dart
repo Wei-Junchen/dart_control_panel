@@ -9,10 +9,15 @@ import 'package:dart_control_panel/features/telemetry/udp_telemetry_source.dart'
 import 'package:flutter/material.dart';
 
 import 'package:dart_control_panel/core/board/session/board_session.dart';
+import 'package:dart_control_panel/core/board/session/board_config_snapshot.dart';
+import 'package:dart_control_panel/core/board/api/board_repository.dart';
+import 'dart:async';
 import 'package:dart_control_panel/core/board/session/state_poll_controller.dart';
 import 'package:dart_control_panel/features/telemetry/telemetry_controller.dart';
 import 'package:dart_control_panel/core/preferences/board_address_store.dart';
 import 'package:dart_control_panel/features/diagnostics/diagnostics_screen.dart';
+import 'package:dart_control_panel/features/devices/devices_screen.dart';
+import 'package:dart_control_panel/core/preferences/device_registry.dart';
 import 'package:dart_control_panel/app/flight_logs/flight_log_controller.dart';
 import 'package:dart_control_panel/app/flight_logs/flight_logs_screen.dart';
 import 'package:dart_control_panel/features/files/board_file_api.dart';
@@ -30,6 +35,7 @@ class HomeShell extends StatefulWidget {
     this.telemetryController,
     this.enableAutoDiscovery = true,
     this.connectionSettingsStore,
+    this.deviceRegistry,
   });
 
   /// Injectable for tests. Production owns one application-lifetime receiver.
@@ -38,6 +44,7 @@ class HomeShell extends StatefulWidget {
   /// Disable live network discovery in isolated widget tests.
   final bool enableAutoDiscovery;
   final ConnectionSettingsStore? connectionSettingsStore;
+  final DeviceRegistry? deviceRegistry;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -47,6 +54,8 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   final FlightLogController _flightLogs = FlightLogController();
   late final BoardSession _session = BoardSession();
+  late final DeviceRegistry _deviceRegistry =
+      widget.deviceRegistry ?? DeviceRegistry.instance;
   late final TelemetryController _telemetry =
       widget.telemetryController ?? TelemetryController();
   late final bool _ownsTelemetry = widget.telemetryController == null;
@@ -65,7 +74,7 @@ class _HomeShellState extends State<HomeShell> {
     _Dest(label: 'Telemetry', icon: Icons.radar),
     _Dest(label: 'Ground Test', icon: Icons.video_settings_outlined),
     _Dest(label: 'Mode', icon: Icons.track_changes),
-    _Dest(label: 'Logs', icon: Icons.folder_open_outlined),
+    _Dest(label: 'Devices', icon: Icons.devices_other),
   ];
 
   @override
@@ -162,6 +171,68 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  Future<BoardConfigSnapshot?> _captureConnectionConfig(
+    BoardRepository repo,
+    String host,
+    String? deviceId,
+    String? sn,
+    Directory? sessionDirectory,
+  ) async {
+    try {
+      final beforeRev = _session.state?.configRev;
+      final config = await repo.getConfig();
+      List<int>? resolvedRoi;
+      try {
+        final state = await repo.getState();
+        final roi = state.worker?.vision.detectRoi;
+        if (beforeRev != null &&
+            beforeRev == state.configRev &&
+            roi != null &&
+            roi.length == 4 &&
+            roi[0] >= 0 &&
+            roi[1] >= 0 &&
+            roi[2] > 0 &&
+            roi[3] > 0) {
+          resolvedRoi = List.of(roi);
+        }
+      } catch (_) {
+        /* A worker may not be running; preserve the config anyway. */
+      }
+      if (!identical(_session.repository, repo)) return null;
+      final snapshot = BoardConfigSnapshot(
+        config: config,
+        capturedAt: DateTime.now(),
+        host: host,
+        port: _controlPort,
+        deviceId: deviceId,
+        sn: sn,
+        resolvedRoi: resolvedRoi,
+      );
+      // Independent writes: a storage failure must not disconnect the board.
+      try {
+        await snapshot.archive();
+      } catch (e) {
+        debugPrint('配置快照归档失败: $e');
+      }
+      if (sessionDirectory != null &&
+          identical(_session.repository, repo) &&
+          _telemetry.recorder?.sessionDirectory?.path ==
+              sessionDirectory.path) {
+        try {
+          await snapshot.write(
+            File('${sessionDirectory.path}/board-config.json'),
+          );
+        } catch (e) {
+          debugPrint('遥测配置快照保存失败: $e');
+        }
+      }
+      return identical(_session.repository, repo) ? snapshot : null;
+    } catch (e) {
+      debugPrint('读取板端配置快照失败: $e');
+      return null;
+    }
+  }
+
   Future<bool> _connect({String? discoveredHost}) async {
     if (!mounted ||
         _connectionAction ||
@@ -196,6 +267,7 @@ class _HomeShellState extends State<HomeShell> {
         await _endConnection();
         return false;
       }
+      final connectedDevice = _session.state?.device;
       _flightLogs.attach(
         HttpBoardFileApi(host, port: _session.state?.fileService.port ?? 9002),
         _session.repository!,
@@ -205,11 +277,26 @@ class _HomeShellState extends State<HomeShell> {
               ? repo.cleanupRecordings()
               : repo.deleteRecording(args['path'] as String),
         ),
+        deviceId: connectedDevice?.deviceId,
+        deviceSn: connectedDevice?.sn,
       );
       _onSessionChanged();
-      await _telemetry.beginConnection('$host:$_controlPort');
+      await _telemetry.beginConnection(
+        '$host:$_controlPort',
+        deviceId: connectedDevice?.deviceId,
+      );
       _poll?.stop();
       final repo = _session.repository!;
+      final sessionDirectory = _telemetry.recorder?.sessionDirectory;
+      final snapshot = _captureConnectionConfig(
+        repo,
+        host,
+        connectedDevice?.deviceId,
+        connectedDevice?.sn,
+        sessionDirectory,
+      );
+      _flightLogs.setConnectionSnapshot(snapshot);
+      unawaited(snapshot.then<void>((_) {}));
       final source = _telemetry.source;
       if (source is UdpTelemetrySource) {
         source.configureSchemaLoader(
@@ -261,6 +348,31 @@ class _HomeShellState extends State<HomeShell> {
     _setAutomatic(false);
     _hostController.text = host;
     _connect();
+  }
+
+  Future<void> _openDeviceLogs(DeviceRecord record) => _openFlightLogs(record);
+
+  Future<void> _openFlightLogs([
+    DeviceRecord? record,
+    bool unknown = false,
+  ]) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (routeContext) => FlightLogsScreen(
+          controller: _flightLogs,
+          filePort: _session.state?.fileService.port ?? 9002,
+          deviceIdFilter: record?.deviceId,
+          deviceLabel: unknown ? 'unknown' : record?.label,
+          unknownOnly: unknown,
+          initialTab: record == null ? 1 : 0,
+          onReplay: (archive) async {
+            Navigator.of(routeContext).pop();
+            await _telemetry.openArchive(archive);
+            if (mounted) setState(() => _index = 0);
+          },
+        ),
+      ),
+    );
   }
 
   void _openDiagnostics() {
@@ -355,101 +467,109 @@ class _HomeShellState extends State<HomeShell> {
     final handset = MobileUiScale.isHandset(context);
     return Scaffold(
       resizeToAvoidBottomInset: handset ? false : null,
-      body: Row(
-        children: [
-          if (handset)
-            SizedBox(
-              key: const ValueKey('mobile-navigation'),
-              width: 40,
-              child: Material(
-                color: Theme.of(context).colorScheme.surface,
-                child: Column(
-                  children: [
-                    const SizedBox(height: 32),
-                    for (var i = 0; i < _destinations.length; i++)
-                      Tooltip(
-                        message: _destinations[i].label,
-                        child: Semantics(
-                          selected: _index == i,
-                          button: true,
-                          child: InkWell(
-                            onTap: () => setState(() => _index = i),
-                            child: Container(
-                              height: 52,
-                              alignment: Alignment.center,
-                              color: _index == i
-                                  ? Theme.of(
-                                      context,
-                                    ).colorScheme.secondaryContainer
-                                  : null,
-                              child: Icon(_destinations[i].icon, size: 22),
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: Row(
+          children: [
+            if (handset)
+              SizedBox(
+                key: const ValueKey('mobile-navigation'),
+                width: 56,
+                child: Material(
+                  color: Theme.of(context).colorScheme.surface,
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 32),
+                      for (var i = 0; i < _destinations.length; i++)
+                        Tooltip(
+                          message: _destinations[i].label,
+                          child: Semantics(
+                            selected: _index == i,
+                            button: true,
+                            child: InkWell(
+                              onTap: () => setState(() => _index = i),
+                              child: Container(
+                                height: 56,
+                                alignment: Alignment.center,
+                                color: _index == i
+                                    ? Theme.of(
+                                        context,
+                                      ).colorScheme.secondaryContainer
+                                    : null,
+                                child: Icon(_destinations[i].icon, size: 24),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    const Spacer(),
-                    ListenableBuilder(
-                      listenable: _session,
-                      builder: (context, _) => Tooltip(
-                        message: 'Board Connect',
-                        child: InkWell(
-                          key: const ValueKey('mobile-connection-button'),
-                          onTap: _showConnection,
-                          child: SizedBox(
-                            height: 48,
-                            child: Center(
-                              child: Icon(
-                                _session.connected
-                                    ? Icons.link
-                                    : Icons.link_off,
-                                size: 22,
-                                color: _session.connected ? Colors.teal : null,
+                      const Spacer(),
+                      ListenableBuilder(
+                        listenable: _session,
+                        builder: (context, _) => Tooltip(
+                          message: 'Board Connect',
+                          child: InkWell(
+                            key: const ValueKey('mobile-connection-button'),
+                            onTap: _showConnection,
+                            child: SizedBox(
+                              height: 56,
+                              child: Center(
+                                child: Icon(
+                                  _session.connected
+                                      ? Icons.link
+                                      : Icons.link_off,
+                                  size: 24,
+                                  color: _session.connected
+                                      ? Colors.teal
+                                      : null,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    SizedBox(height: MediaQuery.paddingOf(context).bottom + 6),
-                  ],
+                      SizedBox(
+                        height: MediaQuery.paddingOf(context).bottom + 6,
+                      ),
+                    ],
+                  ),
                 ),
+              )
+            else
+              NavigationRail(
+                selectedIndex: _index,
+                onDestinationSelected: (i) => setState(() => _index = i),
+                labelType: NavigationRailLabelType.all,
+                leading: const SizedBox(
+                  height: 48,
+                  child: Center(child: Icon(Icons.track_changes)),
+                ),
+                destinations: [
+                  for (final d in _destinations)
+                    NavigationRailDestination(
+                      icon: Icon(d.icon),
+                      selectedIcon: Icon(d.icon),
+                      label: Text(d.label),
+                    ),
+                ],
               ),
-            )
-          else
-            NavigationRail(
-              selectedIndex: _index,
-              onDestinationSelected: (i) => setState(() => _index = i),
-              labelType: NavigationRailLabelType.all,
-              leading: const SizedBox(
-                height: 48,
-                child: Center(child: Icon(Icons.track_changes)),
+            const VerticalDivider(thickness: 1, width: 1),
+            Expanded(
+              child: Column(
+                children: [
+                  BoardErrorBanner(state: _session.state),
+                  Expanded(child: page),
+                  if (!handset)
+                    Padding(
+                      padding: MediaQuery.sizeOf(context).height < 500
+                          ? const EdgeInsets.symmetric(horizontal: 12)
+                          : const EdgeInsets.fromLTRB(12, 6, 12, 10),
+                      child: _dock(),
+                    ),
+                ],
               ),
-              destinations: [
-                for (final d in _destinations)
-                  NavigationRailDestination(
-                    icon: Icon(d.icon),
-                    selectedIcon: Icon(d.icon),
-                    label: Text(d.label),
-                  ),
-              ],
             ),
-          const VerticalDivider(thickness: 1, width: 1),
-          Expanded(
-            child: Column(
-              children: [
-                BoardErrorBanner(state: _session.state),
-                Expanded(child: page),
-                if (!handset)
-                  Padding(
-                    padding: MediaQuery.sizeOf(context).height < 500
-                        ? const EdgeInsets.symmetric(horizontal: 12)
-                        : const EdgeInsets.fromLTRB(12, 6, 12, 10),
-                    child: _dock(),
-                  ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -490,13 +610,13 @@ class _HomeShellState extends State<HomeShell> {
       ),
       1 => GroundTestScreen(session: _session),
       2 => ModeScreen(session: _session),
-      3 => FlightLogsScreen(
-        controller: _flightLogs,
-        filePort: _session.state?.fileService.port ?? 9002,
-        onReplay: (archive) async {
-          await _telemetry.openArchive(archive);
-          if (mounted) setState(() => _index = 0);
-        },
+      3 => DevicesScreen(
+        registry: _deviceRegistry,
+        session: _session,
+        onConnect: _connectTo,
+        onOpenLogs: _openDeviceLogs,
+        onOpenAllLogs: () => _openFlightLogs(),
+        onOpenUnknownLogs: () => _openFlightLogs(null, true),
       ),
       _ => const SizedBox.shrink(),
     };

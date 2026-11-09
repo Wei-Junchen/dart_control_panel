@@ -13,6 +13,7 @@ import 'package:dart_control_panel/features/ground_test/ground_test_screen.dart'
 import 'package:dart_control_panel/features/mode/mode_screen.dart';
 import 'package:dart_control_panel/features/files/board_file_api.dart';
 import 'package:dart_control_panel/core/video/video_panel.dart';
+import 'package:dart_control_panel/shared/widgets/mobile_ui_scale.dart';
 
 import '../helpers/fake_video_backend.dart';
 
@@ -31,42 +32,108 @@ DaemonState _fixtureState({bool rtspOn = true}) {
 
 void main() {
   group('GroundTestScreen', () {
-    testWidgets('wide layout keeps video and uses JSON fallback without config schema', (
+    testWidgets(
+      'wide layout keeps video and uses JSON fallback without config schema',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        final session = BoardSession();
+        session.updateState(_fixtureState());
+        final backend = FakeVideoBackend();
+        final video = VideoController(backend: backend);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: GroundTestScreen(session: session, videoController: video),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.text('Ground Test'), findsOneWidget);
+        expect(find.byType(VideoPanel), findsOneWidget);
+        expect(find.text('画面配置'), findsOneWidget);
+        expect(find.text('Configuration Studio'), findsOneWidget);
+        expect(find.text('default.json'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('json-config-source')),
+          findsOneWidget,
+        );
+
+        final controlsSegment = find.descendant(
+          of: find.byKey(const ValueKey('configuration-view-selector')),
+          matching: find.text('Controls'),
+        );
+        await tester.tap(controlsSegment);
+        await tester.pump();
+        expect(find.textContaining('板端未提供受支持的 config_schema'), findsOneWidget);
+        expect(find.text('roll sign'), findsNothing);
+        expect(find.text('NV21 green score（唯一识别器）'), findsNothing);
+        video.dispose();
+        session.disconnect();
+      },
+    );
+
+    testWidgets('handset switches directly between large preview and config', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(1280, 800);
-      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(800, 363);
+      tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-
-      final session = BoardSession();
-      session.updateState(_fixtureState());
-      final backend = FakeVideoBackend();
-      final video = VideoController(backend: backend);
-
+      final session = BoardSession()..updateState(_fixtureState());
+      final video = VideoController(backend: FakeVideoBackend());
       await tester.pumpWidget(
         MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.android),
+          builder: (context, child) => MobileUiScale(child: child!),
           home: GroundTestScreen(session: session, videoController: video),
         ),
       );
       await tester.pump();
-
-      expect(find.text('Ground Test'), findsOneWidget);
-      expect(find.byType(VideoPanel), findsOneWidget);
-      expect(find.text('画面配置'), findsOneWidget);
-      expect(find.text('Configuration Studio'), findsOneWidget);
-      expect(find.text('default.json'), findsOneWidget);
-      expect(find.byKey(const ValueKey('json-config-source')), findsOneWidget);
-
-      final controlsSegment = find.descendant(
-        of: find.byKey(const ValueKey('configuration-view-selector')),
-        matching: find.text('Controls'),
+      final preview = find.byType(VideoPanel);
+      expect(preview, findsOneWidget);
+      expect(
+        tester.getSize(preview).height * MobileUiScale.handsetScale,
+        greaterThan(240),
       );
-      await tester.tap(controlsSegment);
+      expect(find.byKey(const ValueKey('json-config-source')), findsNothing);
+      await tester.tap(find.text('配置'));
       await tester.pump();
-      expect(find.textContaining('板端未提供受支持的 config_schema'), findsOneWidget);
-      expect(find.text('roll sign'), findsNothing);
-      expect(find.text('NV21 green score（唯一识别器）'), findsNothing);
-      video.dispose();
+      final source = find.byKey(const ValueKey('json-config-source'));
+      expect(source, findsOneWidget);
+      expect(
+        tester.getSize(source).height * MobileUiScale.handsetScale,
+        greaterThan(100),
+      );
+      await tester.enterText(source, '{"example": 42}');
+      tester.view.viewInsets = const FakeViewPadding(bottom: 250);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('json-config-source-right')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('mobile-ground-view-selector')),
+        findsNothing,
+      );
+      expect(tester.getSize(source).height, greaterThan(20));
+      expect(tester.takeException(), isNull);
+      tester.view.resetViewInsets();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('预览'));
+      await tester.pump();
+      await tester.tap(find.text('配置'));
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(source).controller!.text,
+        '{"example": 42}',
+      );
+      await tester.tap(find.text('画面设置'));
+      await tester.pump();
+      expect(find.text('画面配置'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
       session.disconnect();
     });
 

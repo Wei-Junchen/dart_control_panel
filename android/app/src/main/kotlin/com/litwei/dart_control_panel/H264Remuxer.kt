@@ -10,10 +10,10 @@ import kotlin.math.roundToLong
 
 /** File-only, progressive I/P Annex-B from the board. No decoding/re-encoding. */
 internal object H264Remuxer {
-    fun convert(raw: File, fps: Double): Map<String, Any> {
+    fun convert(raw: File, fps: Double, destination: File? = null, cancelled: () -> Boolean = { false }): Map<String, Any> {
         require(fps.isFinite() && fps in 1.0..1000.0) { "帧率应在1..1000之间" }
         require(raw.isFile && raw.extension.lowercase() == "h264") { "没有 H.264 原文件" }
-        val output = File(raw.parentFile, raw.nameWithoutExtension + ".mp4")
+        val output = destination ?: File(raw.parentFile, raw.nameWithoutExtension + ".mp4")
         require(!output.exists()) { "MP4 已存在，不覆盖" }
         val temporary = File(output.path + ".part")
         require(temporary.createNewFile()) { "存在未完成的 MP4 .part 文件，请先检查" }
@@ -43,7 +43,7 @@ internal object H264Remuxer {
         try {
             AnnexBReader(raw.inputStream()).use { reader ->
                 while (true) {
-                    check(!Thread.currentThread().isInterrupted) { "封装已取消" }
+                    check(!Thread.currentThread().isInterrupted && !cancelled()) { "封装已取消" }
                     val nal = reader.next() ?: break
                     require((nal[0].toInt() and 128) == 0) { "无效 H.264 NAL 头" }
                     when (val type = nal[0].toInt() and 31) {

@@ -171,7 +171,11 @@ class TelemetryController extends ChangeNotifier {
       throw StateError('recording write failed; original retained');
     }
     Directory? stagingClip;
-    final root = destination ?? recorder?.directory ?? directory.parent;
+    final root =
+        destination ??
+        recorder?.sessionRoot ??
+        recorder?.directory ??
+        directory.parent;
     final original = await TelemetryArchive.open(directory);
     var value = original;
     try {
@@ -221,8 +225,9 @@ class TelemetryController extends ChangeNotifier {
     _connectionManaged = true;
   }
 
-  Future<void> beginConnection(String endpoint) async {
+  Future<void> beginConnection(String endpoint, {String? deviceId}) async {
     if (_connectionActive) await endConnection();
+    recorder?.deviceId = deviceId;
     _viewRequest++;
     _connectionManaged = true;
     _connectionArchive = null;

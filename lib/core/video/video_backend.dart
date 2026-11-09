@@ -11,13 +11,27 @@ extension VideoStatusX on VideoStatus {
 }
 
 /// Event emitted by a [VideoBackend] (decoder/library state).
-enum VideoBackendEventKind { buffering, playing, paused, stopped, error }
+enum VideoBackendEventKind {
+  buffering,
+  playing,
+  paused,
+  stopped,
+  error,
+  position,
+}
 
 class VideoBackendEvent {
-  const VideoBackendEvent(this.kind, {this.message});
+  const VideoBackendEvent(
+    this.kind, {
+    this.message,
+    this.position,
+    this.duration,
+  });
 
   final VideoBackendEventKind kind;
   final String? message;
+  final Duration? position;
+  final Duration? duration;
 }
 
 /// Player-backend seam. The app logic ([VideoController]) only speaks to this
@@ -30,6 +44,7 @@ abstract class VideoBackend {
 
   Future<void> pause();
   Future<void> resume();
+  Future<void> seek(Duration position);
   Future<void> close();
 
   /// Player surface to embed in the UI.

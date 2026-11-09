@@ -166,6 +166,28 @@ void main() {
       });
     });
 
+    test('parses device identity for per-device storage', () {
+      final state = DaemonState.fromEnvelope({
+        'v': 1,
+        'type': 'state',
+        'payload': {
+          'device': {
+            'device_id': 'dv1_0123456789abcdef0123456789abcdef',
+            'sn': 'DART-000001',
+            'status': 'READY',
+            'wifi_ssid': 'TDT_Dart_DART-000001',
+            'boot_id': 'boot-1',
+            'identity_error': null,
+          },
+        },
+      });
+      expect(state.device.ready, isTrue);
+      expect(state.device.deviceId, 'dv1_0123456789abcdef0123456789abcdef');
+      expect(state.device.sn, 'DART-000001');
+      expect(state.device.displayName, 'DART-000001');
+      expect(state.device.wifiSsid, 'TDT_Dart_DART-000001');
+    });
+
     test('missing sections yield defaults, never crash', () {
       final state = DaemonState.fromEnvelope({
         'v': 1,

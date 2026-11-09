@@ -71,6 +71,16 @@ class ConnectionDock extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (session.state?.device.deviceId != null)
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 300),
+                          child: Text(
+                            '${session.state!.device.displayName} · '
+                            '${session.state!.device.deviceId}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       IconButton(
                         tooltip: 'Disconnect',
                         onPressed: onDisconnect,

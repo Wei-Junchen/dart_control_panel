@@ -98,7 +98,7 @@ class _TelemetryScreenState extends State<TelemetryScreen> {
             ? const Color(0xFFF3F7FA)
             : colors.surfaceContainerLowest,
         appBar: AppBar(
-          toolbarHeight: handset ? 28 : 48,
+          toolbarHeight: handset ? 40 : 48,
           titleTextStyle: handset
               ? theme.textTheme.titleSmall?.copyWith(color: colors.onSurface)
               : null,

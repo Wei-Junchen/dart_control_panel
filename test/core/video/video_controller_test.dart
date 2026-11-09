@@ -142,6 +142,38 @@ void main() {
     expect(MediaKitBackend.defaultOpenOptions['framedrop'], 'yes');
   });
 
+  test('duration and position drive a clamped seek', () async {
+    await controller.open('file:///tmp/clip.mp4');
+    backend.emitDuration(const Duration(seconds: 90));
+    backend.emitPosition(const Duration(seconds: 30));
+    await flush();
+    expect(controller.duration, const Duration(seconds: 90));
+    expect(controller.position, const Duration(seconds: 30));
+    expect(controller.seekable, isTrue);
+
+    await controller.seek(const Duration(seconds: 200));
+    expect(backend.seekCalls, 1);
+    expect(backend.lastSeek, const Duration(seconds: 90));
+    expect(controller.position, const Duration(seconds: 90));
+
+    await controller.stop();
+    expect(controller.duration, isNull);
+    expect(controller.position, isNull);
+    expect(controller.seekable, isFalse);
+  });
+
+  test('live streams are never seekable', () async {
+    final liveBackend = FakeVideoBackend();
+    final live = VideoController(backend: liveBackend, liveStream: true);
+    await live.open('rtsp://host:8554/live');
+    liveBackend.emitDuration(const Duration(seconds: 10));
+    await pumpEventQueue();
+    expect(live.seekable, isFalse);
+    await live.seek(const Duration(seconds: 5));
+    expect(liveBackend.seekCalls, 0);
+    live.dispose();
+  });
+
   test('live mode is opt-in so recording playback keeps normal timing', () {
     final recording = VideoController(backend: FakeVideoBackend());
     final live = VideoController(backend: FakeVideoBackend(), liveStream: true);

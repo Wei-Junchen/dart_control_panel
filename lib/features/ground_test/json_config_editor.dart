@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:dart_control_panel/shared/widgets/mobile_ui_scale.dart';
 
 typedef JsonConfigLoader = Future<Map<String, dynamic>> Function();
 typedef JsonConfigUploader =
@@ -158,6 +159,7 @@ class JsonConfigEditor extends StatefulWidget {
     this.onBusyChanged,
     this.connected = true,
     this.uploadLocked = false,
+    this.keyboardCompact = false,
   });
 
   final Map<String, dynamic>? initialConfig;
@@ -167,6 +169,7 @@ class JsonConfigEditor extends StatefulWidget {
   final ValueChanged<bool>? onBusyChanged;
   final bool connected;
   final bool uploadLocked;
+  final bool keyboardCompact;
 
   @override
   State<JsonConfigEditor> createState() => JsonConfigEditorState();
@@ -179,6 +182,32 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
   static const _pretty = JsonEncoder.withIndent('  ');
 
   late final TextEditingController _controller = TextEditingController();
+  final _leftController = TextEditingController();
+  final _rightController = TextEditingController();
+  bool _editingColumn = false;
+
+  void _syncColumns() {
+    if (_editingColumn) return;
+    final text = _controller.text;
+    final breaks = <int>[];
+    for (var i = 0; i < text.length; i++) {
+      if (text.codeUnitAt(i) == 10) breaks.add(i);
+    }
+    final split = breaks.isEmpty
+        ? text.length
+        : breaks[(breaks.length - 1) ~/ 2] + 1;
+    _leftController.text = text.substring(0, split);
+    _rightController.text = text.substring(split);
+  }
+
+  void _onColumnChanged(String _) {
+    final text = _leftController.text + _rightController.text;
+    _editingColumn = true;
+    _controller.text = text;
+    _editingColumn = false;
+    _onChanged(text);
+  }
+
   bool _busy = false;
   bool _dirty = false;
   String _operationMessage = '';
@@ -187,6 +216,7 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
   @override
   void initState() {
     super.initState();
+    _controller.addListener(_syncColumns);
     final config = widget.initialConfig;
     if (widget.sharedDraft != null) {
       _syncShared();
@@ -214,7 +244,10 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
   @override
   void dispose() {
     widget.sharedDraft?.removeListener(_syncShared);
+    _controller.removeListener(_syncColumns);
     _controller.dispose();
+    _leftController.dispose();
+    _rightController.dispose();
     super.dispose();
   }
 
@@ -418,38 +451,62 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _toolbar(context, parsed, canUpload),
-              const Divider(height: 1, color: Color(0xFF243044)),
+              if (!widget.keyboardCompact) ...[
+                _toolbar(context, parsed, canUpload),
+                const Divider(height: 1, color: Color(0xFF243044)),
+              ],
               Expanded(
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: TextField(
-                        key: const ValueKey('json-config-source'),
-                        controller: _controller,
-                        enabled: !_busy && !(widget.sharedDraft?.busy ?? false),
-                        expands: true,
-                        minLines: null,
-                        maxLines: null,
-                        keyboardType: TextInputType.multiline,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        smartDashesType: SmartDashesType.disabled,
-                        smartQuotesType: SmartQuotesType.disabled,
-                        style: const TextStyle(
-                          color: Color(0xFFD7E3F4),
-                          fontFamily: 'monospace',
-                          fontSize: 13,
-                          height: 1.55,
-                        ),
-                        cursorColor: const Color(0xFF5EEAD4),
-                        decoration: const InputDecoration(
-                          hintText: 'Reload from board or open a .json file…',
-                          hintStyle: TextStyle(color: Color(0xFF64748B)),
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.all(18),
-                        ),
-                        onChanged: _onChanged,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final split =
+                              MobileUiScale.isHandset(context) &&
+                              MediaQuery.sizeOf(context).width >
+                                  MediaQuery.sizeOf(context).height &&
+                              constraints.maxWidth >= 600;
+                          if (!split) {
+                            return _sourceField(
+                              _controller,
+                              const ValueKey('json-config-source'),
+                              _onChanged,
+                            );
+                          }
+                          final leftLines = '\n'
+                              .allMatches(_leftController.text)
+                              .length;
+                          final leftEnd =
+                              leftLines +
+                              (_leftController.text.endsWith('\n') ? 0 : 1);
+                          final rightStart = leftLines + 1;
+                          final totalLines =
+                              '\n'.allMatches(_controller.text).length + 1;
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: _sourceColumn(
+                                  _leftController,
+                                  const ValueKey('json-config-source'),
+                                  '行 1–${leftEnd.clamp(1, totalLines)}',
+                                ),
+                              ),
+                              const VerticalDivider(
+                                width: 1,
+                                thickness: 1,
+                                color: Color(0xFF334155),
+                              ),
+                              Expanded(
+                                child: _sourceColumn(
+                                  _rightController,
+                                  const ValueKey('json-config-source-right'),
+                                  '行 $rightStart–$totalLines',
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
                     if (_busy)
@@ -462,56 +519,113 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
                   ],
                 ),
               ),
-              Container(
-                color: const Color(0xFF111A2B),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 9,
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      valid ? Icons.check_circle_outline : Icons.error_outline,
-                      size: 16,
-                      color: valid
-                          ? const Color(0xFF5EEAD4)
-                          : const Color(0xFFFCA5A5),
-                    ),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: Text(
-                        _operationMessage.isNotEmpty
-                            ? _operationMessage
-                            : valid
-                            ? 'Valid JSON object'
-                            : validationMessage,
-                        key: const ValueKey('json-config-status'),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: _operationMessage.isNotEmpty
-                              ? (_operationError
-                                    ? const Color(0xFFFCA5A5)
-                                    : const Color(0xFF93C5FD))
-                              : (parsed.valid
-                                    ? const Color(0xFF99F6E4)
-                                    : const Color(0xFFFCA5A5)),
+              if (!widget.keyboardCompact)
+                Container(
+                  color: const Color(0xFF111A2B),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 9,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        valid
+                            ? Icons.check_circle_outline
+                            : Icons.error_outline,
+                        size: 16,
+                        color: valid
+                            ? const Color(0xFF5EEAD4)
+                            : const Color(0xFFFCA5A5),
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          _operationMessage.isNotEmpty
+                              ? _operationMessage
+                              : valid
+                              ? 'Valid JSON object'
+                              : validationMessage,
+                          key: const ValueKey('json-config-status'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: _operationMessage.isNotEmpty
+                                ? (_operationError
+                                      ? const Color(0xFFFCA5A5)
+                                      : const Color(0xFF93C5FD))
+                                : (parsed.valid
+                                      ? const Color(0xFF99F6E4)
+                                      : const Color(0xFFFCA5A5)),
+                          ),
                         ),
                       ),
-                    ),
-                    Text(
-                      '$lines lines  ·  $bytes bytes',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: const Color(0xFF94A3B8),
+                      Text(
+                        '$lines lines  ·  $bytes bytes',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: const Color(0xFF94A3B8),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _sourceColumn(
+    TextEditingController controller,
+    Key key,
+    String label,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+          child: Text(
+            label,
+            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+          ),
+        ),
+        Expanded(child: _sourceField(controller, key, _onColumnChanged)),
+      ],
+    );
+  }
+
+  Widget _sourceField(
+    TextEditingController controller,
+    Key key,
+    ValueChanged<String> onChanged,
+  ) {
+    return TextField(
+      key: key,
+      controller: controller,
+      enabled: !_busy && !(widget.sharedDraft?.busy ?? false),
+      expands: true,
+      minLines: null,
+      maxLines: null,
+      keyboardType: TextInputType.multiline,
+      autocorrect: false,
+      enableSuggestions: false,
+      smartDashesType: SmartDashesType.disabled,
+      smartQuotesType: SmartQuotesType.disabled,
+      style: const TextStyle(
+        color: Color(0xFFD7E3F4),
+        fontFamily: 'monospace',
+        fontSize: 13,
+        height: 1.55,
+      ),
+      cursorColor: const Color(0xFF5EEAD4),
+      decoration: const InputDecoration(
+        hintText: 'Reload from board or open a .json file…',
+        hintStyle: TextStyle(color: Color(0xFF64748B)),
+        border: InputBorder.none,
+        contentPadding: EdgeInsets.all(18),
+      ),
+      onChanged: onChanged,
     );
   }
 
@@ -563,28 +677,34 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
                 ),
               ),
               const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'default.json',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: const Color(0xFFF1F5F9),
-                      fontWeight: FontWeight.w700,
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'default.json',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: const Color(0xFFF1F5F9),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  Text(
-                    _dirty ? 'LOCAL CHANGES' : 'BOARD COPY',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: _dirty
-                          ? const Color(0xFFFBBF24)
-                          : const Color(0xFF5EEAD4),
-                      letterSpacing: 0.8,
+                    Text(
+                      _dirty ? 'LOCAL CHANGES' : 'BOARD COPY',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: _dirty
+                            ? const Color(0xFFFBBF24)
+                            : const Color(0xFF5EEAD4),
+                        letterSpacing: 0.8,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               tool(
                 label: 'Open JSON',
                 icon: Icons.folder_open_outlined,
@@ -609,6 +729,10 @@ class JsonConfigEditorState extends State<JsonConfigEditor> {
               const SizedBox(width: 6),
               FilledButton.icon(
                 key: const ValueKey('upload-json-config'),
+                style: FilledButton.styleFrom(
+                  disabledBackgroundColor: const Color(0xFF334155),
+                  disabledForegroundColor: const Color(0xFFCBD5E1),
+                ),
                 onPressed: canUpload ? () => _upload(parsed.config!) : null,
                 icon: const Icon(Icons.cloud_upload_outlined, size: 18),
                 label: Text(compact ? 'Upload' : 'Upload to board'),

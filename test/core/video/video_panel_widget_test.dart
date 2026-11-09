@@ -132,6 +132,112 @@ void main() {
     expect(backend.openCalls, 2);
   });
 
+  testWidgets('playback dialog shows a seek bar with total duration', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VideoPlaybackDialog(
+          controller: controller,
+          url: 'file:///tmp/clip.mp4',
+          title: 'clip.mp4',
+        ),
+      ),
+    );
+    backend.emitDuration(const Duration(seconds: 90));
+    backend.emitPosition(const Duration(seconds: 10));
+    backend.emitPlaying();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(Slider), findsOneWidget);
+    expect(find.text('00:10'), findsOneWidget);
+    expect(find.text('01:30'), findsOneWidget);
+    expect(find.text('clip.mp4'), findsNothing);
+    final sliderY = tester.getCenter(find.byType(Slider)).dy;
+    expect(tester.getCenter(find.byTooltip('Pause')).dy, closeTo(sliderY, 1));
+    expect(tester.getCenter(find.byTooltip('关闭播放')).dy, closeTo(sliderY, 1));
+  });
+
+  testWidgets('file playback hides status and path but retains controls', (
+    tester,
+  ) async {
+    const url = 'file:///private/path/clip.mp4';
+    await controller.open(url);
+    backend.emitPlaying();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VideoPlaybackDialog(
+          controller: controller,
+          url: url,
+          title: 'clip.mp4',
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text(url), findsNothing);
+    expect(find.text('playing'), findsNothing);
+    expect(find.byTooltip('关闭播放'), findsOneWidget);
+    await tester.tap(find.byTooltip('Pause'));
+    expect(backend.pauseCalls, 1);
+    backend.emitPaused();
+    await tester.pump();
+    await tester.tap(find.byTooltip('Resume'));
+    expect(backend.resumeCalls, 1);
+    backend.emitError('failed: $url');
+    await tester.pump();
+    expect(find.textContaining(url), findsNothing);
+    expect(find.textContaining('播放失败'), findsOneWidget);
+    await tester.tap(find.byTooltip('重新播放'));
+    expect(backend.openCalls, 2);
+  });
+
+  testWidgets('seeks while the slider is still being dragged', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () => showVideoPlaybackDialog(
+                  context,
+                  controller: controller,
+                  url: 'file:///tmp/clip.mp4',
+                  title: 'clip.mp4',
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    backend.emitDuration(const Duration(seconds: 90));
+    await tester.pump();
+    await tester.pump();
+
+    final slider = tester.getRect(find.byType(Slider));
+    await tester.tapAt(Offset(slider.right - 40, slider.center.dy));
+    await tester.pump();
+    expect(backend.seekCalls, 0);
+    final gesture = await tester.startGesture(
+      Offset(slider.left + 12, slider.center.dy),
+    );
+    await tester.pump();
+    for (var i = 0; i < 6; i++) {
+      await gesture.moveBy(const Offset(80, 0));
+      await tester.pump();
+    }
+
+    expect(backend.seekCalls, greaterThan(1));
+    expect(backend.lastSeek!.inSeconds, greaterThan(0));
+
+    await gesture.up();
+    await tester.pump();
+  });
+
   test('rtspAvailableFor requires both feature and stream flags', () {
     expect(rtspAvailableFor(_state()), isTrue); // fixture has both on
     final workerOff = DaemonState.fromEnvelope({

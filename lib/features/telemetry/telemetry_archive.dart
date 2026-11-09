@@ -1,12 +1,39 @@
 import 'package:dart_control_panel/core/platform/app_paths.dart';
+import 'package:dart_control_panel/core/board/session/board_config_snapshot.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'package:dart_control_panel/core/preferences/telemetry_log_settings.dart';
+import 'package:dart_control_panel/core/preferences/device_registry.dart';
 
 import 'package:flutter/foundation.dart';
 import 'telemetry_sample.dart';
+
+List<String> _csvCells(String line) {
+  final out = <String>[];
+  final value = StringBuffer();
+  var quoted = false;
+  for (var i = 0; i < line.length; i++) {
+    final c = line[i];
+    if (c == '"') {
+      if (quoted && i + 1 < line.length && line[i + 1] == '"') {
+        value.write('"');
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (c == ',' && !quoted) {
+      out.add(value.toString());
+      value.clear();
+    } else {
+      value.write(c);
+    }
+  }
+  if (quoted) throw const FormatException('CSV quote is not closed');
+  out.add(value.toString());
+  return out;
+}
 
 /// Only accepted receiver samples enter this bounded, asynchronous writer.
 /// UI windows and playback never own the recording lifecycle.
@@ -20,6 +47,10 @@ class TelemetryRecorder extends ChangeNotifier {
     this.directory = directory ?? defaultDirectory(settings: settings);
   }
   Directory directory = Directory('.');
+  String? deviceId;
+  Directory get sessionRoot => deviceId == null || deviceId!.isEmpty
+      ? directory
+      : Directory('${directory.path}/${safeDeviceDirectory(deviceId)}');
   final TelemetryLogSettingsStore settingsStore;
   late TelemetryLogSettings settings;
   Future<void> updateSettings(TelemetryLogSettings value) async {
@@ -89,13 +120,14 @@ class TelemetryRecorder extends ChangeNotifier {
     _metadata = null;
     _lastSample = null;
     _signature = null;
-    await directory.create(recursive: true);
+    final root = sessionRoot;
+    await root.create(recursive: true);
     final stamp = DateTime.now().toUtc().toIso8601String().replaceAll(
       RegExp(r'[^0-9]'),
       '',
     );
     sessionDirectory = Directory(
-      '${directory.path}/connection_${stamp}_${pid}_${_counter++}',
+      '${root.path}/connection_${stamp}_${pid}_${_counter++}',
     );
     if (await sessionDirectory!.exists()) {
       throw StateError('session already exists');
@@ -104,6 +136,7 @@ class TelemetryRecorder extends ChangeNotifier {
     _sessionMetadata = {
       'format': 'dart_telemetry_session_v1',
       'source': endpoint,
+      'device_id': deviceId,
       'started_at': DateTime.now().toUtc().toIso8601String(),
       'complete': false,
     };
@@ -422,35 +455,93 @@ class TelemetryArchive {
 
   static Future<TelemetryArchive> open(Directory directory) async {
     final metaFile = File('${directory.path}/metadata.json');
-    if (await metaFile.length() > 1048576) {
-      throw const FormatException('recording metadata too large');
-    }
-    final metadata = jsonDecode(await metaFile.readAsString());
-    if (metadata is Map<String, dynamic> &&
-        metadata['format'] == 'dart_telemetry_session_v1') {
-      final archive = TelemetrySessionArchive._(directory, metadata);
+    if (await metaFile.exists()) {
+      if (await metaFile.length() > 1048576) {
+        throw const FormatException('recording metadata too large');
+      }
+      final metadata = jsonDecode(await metaFile.readAsString());
+      if (metadata is Map<String, dynamic> &&
+          metadata['format'] == 'dart_telemetry_session_v1') {
+        final archive = TelemetrySessionArchive._(directory, metadata);
+        await archive.refresh();
+        await _attachConfigSnapshot(archive);
+        return archive;
+      }
+      if (metadata is! Map<String, dynamic> ||
+          metadata['format'] != 'dart_telemetry_csv_v1') {
+        throw const FormatException('unsupported recording metadata');
+      }
+      final names = metadata['columns'];
+      if (names is! List ||
+          names.length > 128 ||
+          names.any(
+            (n) =>
+                n is! String ||
+                !RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(n),
+          ) ||
+          names.toSet().length != names.length) {
+        throw const FormatException('invalid recording columns');
+      }
+      var file = File('${directory.path}/samples.csv');
+      if (!await file.exists()) {
+        file = File('${directory.path}/samples.csv.part');
+      }
+      final archive = TelemetryArchive._(directory, file, metadata);
       await archive.refresh();
+      await _attachConfigSnapshot(archive);
       return archive;
     }
-    if (metadata is! Map<String, dynamic> ||
-        metadata['format'] != 'dart_telemetry_csv_v1') {
-      throw const FormatException('unsupported recording metadata');
+    final manifestFile = File('${directory.path}/flight.json');
+    Map<String, dynamic> manifest = {};
+    if (await manifestFile.exists() && await manifestFile.length() <= 1048576) {
+      final value = jsonDecode(await manifestFile.readAsString());
+      if (value is Map<String, dynamic>) manifest = value;
     }
-    final names = metadata['columns'];
-    if (names is! List ||
-        names.length > 128 ||
-        names.any(
-          (n) =>
-              n is! String || !RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(n),
-        ) ||
-        names.toSet().length != names.length) {
-      throw const FormatException('invalid recording columns');
+    final board = await _boardCsv(directory, manifest);
+    if (board != null) {
+      final archive = BoardCsvArchive._(directory, board, manifest);
+      await archive.refresh();
+      await _attachConfigSnapshot(archive);
+      return archive;
     }
-    var file = File('${directory.path}/samples.csv');
-    if (!await file.exists()) file = File('${directory.path}/samples.csv.part');
-    final archive = TelemetryArchive._(directory, file, metadata);
-    await archive.refresh();
-    return archive;
+    throw const FormatException('recording has no recognised telemetry CSV');
+  }
+
+  static Future<void> _attachConfigSnapshot(TelemetryArchive archive) async {
+    final snapshot = await BoardConfigSnapshot.read(
+      File('${archive.directory.path}/board-config.json'),
+    );
+    if (snapshot != null) {
+      // CSV/schema names remain authoritative; a later connection snapshot
+      // must not be used to infer a historical binary layout.
+      archive.metadata['board_config_snapshot'] = snapshot.toJson();
+    }
+  }
+
+  static Future<File?> _boardCsv(
+    Directory directory,
+    Map<String, dynamic> manifest,
+  ) async {
+    final names = (manifest['files'] as List?)?.whereType<String>() ?? const [];
+    for (final name in names) {
+      if (!name.toLowerCase().endsWith('.csv') ||
+          name.toLowerCase() == 'samples.csv' ||
+          name.endsWith('.part')) {
+        continue;
+      }
+      final file = File('${directory.path}/$name');
+      if (await file.exists()) return file;
+    }
+    await for (final entity in directory.list(followLinks: false)) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last.toLowerCase();
+      if (name.endsWith('.csv') &&
+          name != 'samples.csv' &&
+          !name.endsWith('.part')) {
+        return entity;
+      }
+    }
+    return null;
   }
 
   Future<void> refresh() async {
@@ -728,6 +819,199 @@ class TelemetryArchive {
   }
 }
 
+/// Read-only adapter for the board's own flight CSV. It keeps the raw
+/// `N.csv` and derives the replay timeline in memory instead of writing a
+/// duplicate samples.csv/metadata.json into the flight directory.
+class BoardCsvArchive extends TelemetryArchive {
+  BoardCsvArchive._(
+    Directory directory,
+    File file,
+    Map<String, dynamic> manifest,
+  ) : super._(directory, file, Map<String, dynamic>.of(manifest));
+
+  List<String> _boardHeader = [];
+  final _aliases = <String, String>{};
+  bool _headerSeen = false;
+  int? _firstMonoUs, _previousMonoUs;
+  int? _firstFrame, _lastFrame, _firstVisionUs, _lastVisionUs;
+  int? _previousFrame, _previousVisionUs;
+
+  @override
+  Future<void> refresh() async {
+    final size = await file.length();
+    if (size < _scannedOffset) {
+      throw const FormatException('recording was truncated');
+    }
+    incompleteRows = 0;
+    var headerLine = _scannedOffset == 0;
+    await for (final line in _lines(_scannedOffset, size)) {
+      _scannedOffset = line.offset + utf8.encode(line.text).length + 1;
+      if (headerLine) {
+        var text = line.text;
+        if (text.endsWith('\r')) text = text.substring(0, text.length - 1);
+        _boardHeader = _csvCells(text).map((v) {
+          return v.replaceFirst('\uFEFF', '');
+        }).toList();
+        if (_boardHeader.toSet().length != _boardHeader.length ||
+            !_boardHeader.contains('mono_us')) {
+          throw const FormatException(
+            'board CSV missing mono_us or duplicate columns',
+          );
+        }
+        final names = _boardHeader.where((v) => v != 'uart_schema').toList();
+        if (names.any(
+          (n) => !RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(n),
+        )) {
+          throw const FormatException('invalid board CSV column name');
+        }
+        for (final field in ['pitch', 'roll', 'yaw', 'air_speed']) {
+          if (!names.contains(field)) {
+            for (final candidate in ['uart_$field', 'uart_rx_$field']) {
+              if (names.contains(candidate)) {
+                _aliases[field] = candidate;
+                break;
+              }
+            }
+          }
+        }
+        if (!names.contains('fps') && names.contains('capture_fps')) {
+          _aliases['fps'] = 'capture_fps';
+        }
+        final replayNames = [...names, ..._aliases.keys];
+        if (replayNames.length > 128) {
+          throw const FormatException('CSV has more than 128 replay columns');
+        }
+        columns = ['client_elapsed_us', 'client_received_at', ...replayNames];
+        metadata['columns'] = replayNames;
+        metadata['format'] = 'dart_telemetry_csv_v1';
+        metadata['source'] ??= directory.path;
+        metadata['complete'] = true;
+        metadata['flight_wall_clock_known'] = false;
+        metadata['timestamp_source'] = 'board_monotonic';
+        metadata['board_csv'] = file.path;
+        _headerSeen = true;
+        headerLine = false;
+        continue;
+      }
+      final cells = _csvCells(
+        line.text.endsWith('\r')
+            ? line.text.substring(0, line.text.length - 1)
+            : line.text,
+      );
+      if (cells.length != _boardHeader.length) {
+        throw const FormatException('board CSV column count mismatch');
+      }
+      final raw = <String, String>{
+        for (var i = 0; i < _boardHeader.length; i++) _boardHeader[i]: cells[i],
+      };
+      final mono = int.tryParse(raw['mono_us'] ?? '');
+      if (mono == null ||
+          mono < 0 ||
+          (_previousMonoUs != null && mono < _previousMonoUs!)) {
+        throw const FormatException(
+          'board mono_us is invalid or non-monotonic',
+        );
+      }
+      _firstMonoUs ??= mono;
+      _previousMonoUs = mono;
+      final row = _boardRow(line.text);
+      final frame = int.tryParse(raw['frame'] ?? '');
+      final vision = int.tryParse(raw['vision_mono_us'] ?? raw['mono_us']!);
+      if (frame != null && frame > 0 && vision != null && vision > 0) {
+        if (_previousFrame == null) {
+          _previousFrame = frame;
+          _previousVisionUs = vision;
+        } else if (frame > _previousFrame!) {
+          _firstFrame ??= _previousFrame;
+          _firstVisionUs ??= _previousVisionUs;
+          _previousFrame = frame;
+          _previousVisionUs = vision;
+          _lastFrame = frame;
+          _lastVisionUs = vision;
+        } else if (frame < _previousFrame!) {
+          _previousFrame = frame;
+          _previousVisionUs = vision;
+          _firstFrame = null;
+          _firstVisionUs = null;
+          _lastFrame = null;
+          _lastVisionUs = null;
+        } else {
+          _previousVisionUs = vision;
+        }
+      }
+      if (rows % 256 == 0) _index.add((us: row.elapsedUs, offset: line.offset));
+      durationUs = row.elapsedUs;
+      rows++;
+    }
+    if (!_headerSeen) {
+      throw const FormatException('missing board CSV header');
+    }
+    double? fps;
+    if (_firstFrame != null &&
+        _lastFrame! > _firstFrame! &&
+        _lastVisionUs! > _firstVisionUs!) {
+      final estimate =
+          (_lastFrame! - _firstFrame!) *
+          1000000 /
+          (_lastVisionUs! - _firstVisionUs!);
+      if (estimate >= 1 && estimate <= 1000) fps = estimate;
+    }
+    metadata['rows'] = rows;
+    metadata['duration_us'] = durationUs;
+    metadata['board_first_mono_us'] = _firstMonoUs;
+    metadata['board_last_mono_us'] = _previousMonoUs;
+    if (fps != null) metadata['estimated_video_fps'] = fps;
+  }
+
+  ArchiveRow _boardRow(String line) {
+    if (!_headerSeen) throw const FormatException('board CSV header not read');
+    var text = line;
+    if (text.endsWith('\r')) text = text.substring(0, text.length - 1);
+    final cells = _csvCells(text);
+    if (cells.length != _boardHeader.length) {
+      throw const FormatException('board CSV column count mismatch');
+    }
+    final raw = <String, String>{
+      for (var i = 0; i < _boardHeader.length; i++) _boardHeader[i]: cells[i],
+    };
+    final mono = int.tryParse(raw['mono_us'] ?? '');
+    if (mono == null || mono < 0) {
+      throw const FormatException('board mono_us is invalid');
+    }
+    _firstMonoUs ??= mono;
+    final elapsed = mono - _firstMonoUs!;
+    if (elapsed < 0) {
+      throw const FormatException('board mono_us is non-monotonic');
+    }
+    final values = <String, double>{};
+    for (final name in columns.skip(2)) {
+      final text = raw[_aliases[name] ?? name] ?? '';
+      if (text.isEmpty) {
+        values[name] = double.nan;
+      } else {
+        final value = double.tryParse(text);
+        if (value == null || value.isInfinite) {
+          throw FormatException('board CSV non-numeric column: $name');
+        }
+        values[name] = value;
+      }
+    }
+    final stamp = DateTime.fromMicrosecondsSinceEpoch(elapsed, isUtc: true);
+    return ArchiveRow(
+      elapsed,
+      TelemetrySample(
+        time: stamp,
+        values: values,
+        sourceAddress: metadata['source'] as String?,
+        receivedAt: stamp,
+      ),
+    );
+  }
+
+  @override
+  ArchiveRow _parse(String line) => _boardRow(line);
+}
+
 /// One Connect session may contain several schema/worker segments, all using
 /// the same client monotonic origin. Refresh only scans newly appended bytes.
 class TelemetrySessionArchive extends TelemetryArchive {
@@ -795,7 +1079,8 @@ class TelemetrySessionArchive extends TelemetryArchive {
     ArchiveRow? result;
     for (final segment in _segments.values) {
       final row = await segment.atOrBefore(targetUs);
-      if (row != null && (result == null || row.elapsedUs >= result.elapsedUs)) {
+      if (row != null &&
+          (result == null || row.elapsedUs >= result.elapsedUs)) {
         result = row;
       }
     }

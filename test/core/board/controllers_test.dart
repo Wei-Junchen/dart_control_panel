@@ -109,6 +109,28 @@ void main() {
   });
 
   group('StatePollController', () {
+    test('stopped poll discards a late response', () {
+      fakeAsync((async) {
+        final repo = _ScriptedRepository(slow: const Duration(seconds: 2));
+        var callbacks = 0;
+        var notifications = 0;
+        final poll = StatePollController(
+          repository: repo,
+          connection: ConnectionController(),
+          onPolled: (_) => callbacks++,
+        )..addListener(() => notifications++);
+        poll.start();
+        async.elapse(const Duration(milliseconds: 500));
+        expect(repo.calls, 1);
+        poll.stop();
+        async.elapse(const Duration(seconds: 3));
+        expect(poll.state, isNull);
+        expect(callbacks, 0);
+        expect(notifications, 0);
+        expect(poll.inflight, isFalse);
+      });
+    });
+
     test('polls at 500 ms and updates state without pileup', () {
       fakeAsync((async) {
         final repo = _ScriptedRepository();

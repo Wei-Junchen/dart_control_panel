@@ -18,12 +18,25 @@
 - 手机封装支持板端的 Annex-B、逐行 I/P 帧，流式处理，不整段读入内存；遇到 B 帧、隔行、缺少 SPS/PPS、编码参数中途改变等情况明确报错并删除本次临时文件，请转用桌面版处理。失败不影响原件、已下载 CSV 或遥测回放。
 - Diagnostics 的状态导出保存在上述应用存储的 `exports` 子目录；也可直接复制诊断摘要。应用卸载会清除应用专用文件，请先复制备份。正常覆盖安装不清数据。
 
+## 本地 H.264 离线分析
+
+在设备管理进入飞行日志的“本地副本 / 回放”，选择录像旁的“离线分析”；有 `.raw.h264` 时优先使用原始录像。Android 版在私有缓存中临时无损封装，再由 MediaCodec 解码 YUV，通过 JNI 调用随 APK 携带的原生检测库。分析后临时文件会清理，不改写源录像或板端配置；需要足够的缓存空间。库源码版本见 `android/app/src/main/cpp/vendor/README.md`。
+
+目前可设置五个绿色阈值并查看逐帧汇总与本机耗时；阈值默认值不是录像时的板端配置，ROI、步长、面积和跟踪半径使用检测器默认值。分析时并排显示同一帧的原画面与检测框、解码 Y 平面和颜色阈值掩码；为降低手机负载，预览抽样缩小并约每 180 ms 刷新，但检测仍处理完整分辨率的每一帧。默认放慢处理以方便观察，约 10 帧/秒并非录像真实时间轴，可关闭；阈值在一次分析期间固定，调整后需重新分析。彩色画面由 YUV 转换生成，仅用于预览；白色掩码只表示颜色阈值通过，不代表最终检测目标。
+
+只支持当前封装器支持的逐行 I/P 帧 Annex-B H.264；B 帧、隔行、参数中途变化或解码器不提供可访问 YUV 时会报错。H.264 有损压缩、叠加画面及手机解码器的色彩处理可能使结果与板端原始 NV21 不同；耗时也不代表板端性能。
+
 ## ADB 调试与重建
 
 Release 使用 Flutter 默认 debug 签名进行内部侧载，不用于商店正式发布；不是生产签名，也不要重新生成签名后覆盖安装而不先备份日志。
 
 ```bash
-# 编译；Gradle内存上限2GB，最多2个worker
+# 项目根目录：默认生成 arm64 Release APK（自动执行 flutter pub get）
+./tool/build_android.sh
+# 调试版（包名带 .debug，可与 Release 同时安装）
+./tool/build_android.sh debug
+
+# 也可手动编译；Gradle内存上限2GB，最多2个worker
 flutter build apk --release --target-platform android-arm64 --no-pub
 adb install -r build/app/outputs/flutter-apk/app-release.apk
 adb shell am start -n com.litwei.dart_control_panel/.MainActivity
@@ -42,3 +55,9 @@ flutter run --debug -d <设备序列号>
 无损封装使用 [Android MediaMuxer](https://developer.android.com/reference/android/media/MediaMuxer)；FPS 由用户/CSV 提供，用于生成每帧时间戳。Debug APK 包含 ADB-only `H264RemuxSmoke` 入口，可通过 `CLASSPATH=<设备上的debug.apk> app_process / com.litwei.dart_control_panel.H264RemuxSmoke <输入.h264> <FPS>` 测试原生封装；该入口不进入 Release，不导出 Activity。
 
 Release 和 Debug 请不要同时运行：两者使用同一个 UDP 监听端口1347。切换版本前先 Disconnect 并保存日志，再退出另一版本。测试手机的应用文件可使用 `adb pull /sdcard/Android/data/com.litwei.dart_control_panel/files/ ./phone_dart_logs/` 备份；Debug 的包名及目录多一个 `.debug` 后缀。
+
+离线分析可选择 `luma_ellipse`（实验性亮度椭圆检测）或 `nv21_green`。前者的亮度阈值掩码不是最终检测结果，椭圆拟合与绿色区域校验还会过滤候选；绿色阈值也用于该校验。此选项只影响本地分析，不向板端下发检测模式，板端仍使用 `nv21_green`。
+
+Android 离线逐帧调参：点击“准备视频”后解码并缓存全分辨率 NV21 原始帧；滑动、逐帧切换或修改参数时只重算当前帧。当前帧预览会重置跟踪器；“全片统计”才从头连续跟踪，结果可能不同。帧缓存上限 1 GiB，空间不足时会报错并清理未完成的缓存；退出页面会清理缓存。Linux 参考工具路径目前没有此逐帧预览控件。
+
+连接板子后客户端后台读取一次完整 `get_config`，在应用数据目录 `dart_control_panel/config_snapshots/<device_id 或 _unknown>/` 留存带时间和来源的 JSON 快照，并写入当前连接的遥测会话。复制板端飞行记录时，会将当前连接的快照复制为本地记录的 `board-config.json`；离线分析优先读取该文件的检测模式、阈值、ROI、跟踪半径、面积/像素阈值和采样步长。快照只反映连接时，不代表历史录像录制时的参数。自动 ROI 若能从同一配置版本的 worker 状态读到则使用该值，否则按全画面并在页面提示。旧记录没有快照时使用默认参数，不以 IP 或 unknown 自动猜测设备配置；遥测回放仍以记录本身的列和 schema 为准。离线分析逐帧检测，不能重现板端 `every_n` 跳帧和运行时调参历史。

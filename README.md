@@ -39,7 +39,7 @@ Files:      http://10.198.137.1:9002/v1/ (Ground only)
 
 主机需允许 UDP 1347 入站。若同时运行 VOFA+ 和本程序，同一台主机上通常不能都独占监听同一 UDP 端口；请选择一个接收端，或修改其中一个监听端口/板端目的端口。
 
-UDP 接收器属于应用级生命周期：应用启动即绑定，直到应用退出才释放；从 Telemetry 切换到 Ground Test、Mode 或 Files 不会丢失接收窗口。UDP 不依赖 TCP 连接，也不执行设备 ID 过滤。Files 仍以 TCP control 会话为入口。HTTP 服务本身是无状态的只读接口，不把 TCP 连接当作网络鉴权。
+UDP 接收器属于应用级生命周期：应用启动即绑定，直到应用退出才释放；从 Telemetry 切换到 Ground Test、Mode 或 Devices 不会丢失接收窗口。UDP 不依赖 TCP 连接，也不执行设备 ID 过滤。Files 仍以 TCP control 会话为入口。HTTP 服务本身是无状态的只读接口，不把 TCP 连接当作网络鉴权。
 
 ## 代码结构与职责
 
@@ -134,13 +134,26 @@ Connect 成功后默认持续接收 UDP，不再提供接收开关。Disconnect 
 
 连接会话回归见 `connection_recording_test.dart`：未连接不记录、暂停/拖动继续写盘、恢复最新、Disconnect 收尾、重连隔离、跨 schema 子段汇总、增量索引和超过 10 秒无 UDP 不结束会话。
 
+## 基于 device_id 的设备管理
+
+连接板子后客户端从 `get_state.device` 读取 eFuse 派生的 `device_id`、业务 `sn`、身份状态和 `boot_id`。**目录按 `device_id` 分区，SN 只作为显示名称，不能用来决定磁盘路径。**
+
+- 设备索引默认保存在 `$XDG_CONFIG_HOME/dart_control_panel/devices.json`（Windows 为 `%APPDATA%`），记录 `device_id`、`sn`、最后状态、最后地址/端口和最后连接时间。
+- 导航 **Devices** 按最后连接时间倒序排列设备，可查看 device_id/SN/状态和最后地址。当前已连接设备的按钮显示为灰色“已连接”；其他设备仍可点击切换。点击设备行直接进入该设备的本地日志页。只从本机索引移除设备不会删除任何记录和板端文件。
+- 飞行日志默认根目录为应用数据目录：Linux/macOS `$XDG_DATA_HOME/dart_control_panel/flights`（未设置时为 `~/.local/share/dart_control_panel/flights`），Windows 为 `%LOCALAPPDATA%\dart_control_panel\flights`。
+- 飞行日志本地路径：`<飞行日志根目录>/<device_id>/<host>_flight_N/`。第一次复制自动使用默认根目录，不再弹出目录选择；需要改 base 目录时使用“选择目录”，选择项目目录也不再是默认行为。“默认目录”按钮可恢复应用数据目录。
+- 遥测连接记录路径：`<遥测根目录>/<device_id>/connection_.../`。
+- 没有 `device_id` 的旧本地日志不再出现在设备日志页；文件保留在原处，不会自动删除或搬动。
+- 板端身份不可用或旧固件不返回 `device` 时回退到 `_unknown` 目录，不伪造 SN。
+
 ## 板端飞行日志与离线回放
 
-导航 **Logs** 分为“板端记录”“本地副本 / 回放”“原始文件”：
+Logs 不再是顶级导航项。在 **Devices** 中直接点击某台设备进入该设备的日志页，日志页分为“板端记录”“本地副本 / 回放”“原始文件”：
 
 - 连接后进入 Ground 时自动扫描 `/recordings/flight_N` 并清理真正的空会话目录。不自动下载，不删除零字节文件、不完整的 `.part` 或索引，不影响飞行模式及 UDP 记录。
-- “复制到本地”选择父目录，下载完整会话的 CSV / H.264 / MP4；每次建立独立目录，不覆盖既有副本。保存目录持久化到 `~/.config/dart_control_panel/flight_logs.json`（支持 `XDG_CONFIG_HOME`）。原始文件保留在板端；复制失败保留已下载部分。
-- 本机安装 `ffmpeg` 后可无损封装 H.264 为 MP4（`-c:v copy`，不重新编码）。默认根据 CSV 的视觉帧号和单调时间差估计帧率；缺少可靠估计或封装失败时原件仍保存，可手动指定实际录像 FPS 重试。`DART_FFMPEG` 可指定可执行文件路径。变帧率或丢帧时恒定帧率 MP4 不等价于逐帧精准时间同步。
+- “复制到本地”选择父目录中的当前设备子目录，下载板端 CSV / H.264 以及身份时间 `manifest.json`（本地保存为 `board-manifest.json`）；每次建立独立目录，不覆盖既有副本。保存的基础目录持久化到 `~/.config/dart_control_panel/flight_logs.json`（支持 `XDG_CONFIG_HOME`），实际写入 `<基础目录>/<device_id>/`。原始文件保留在板端；复制失败保留已下载部分。
+- 飞行目录不再生成派生 `samples.csv` / `metadata.json`：遥测回放直接读取板端 `N.csv`，在内存中建立相对时间轴和通道别名。客户端只维护一个 `flight.json`，记录来源、文件清单、板端遥测统计、帧率和 MP4 封装结果。
+- 本机安装 `ffmpeg` 后可无损封装 H.264 为 MP4（`-c:v copy`，不重新编码）。复制时默认同时封装主路 `N.h264 -> N.mp4` 和 raw `N.raw.h264 -> N.raw.mp4`。每条飞行记录提供“叠加录像”和“原始录像”两个查看入口；只有本地实际存在 raw 文件时才显示“原始录像”。点击原始录像而 `N.raw.mp4` 缺失时，会先按帧率估计无损封装再播放。帧率根据 CSV 的视觉帧号和单调时间差估计；缺少可靠估计或封装失败时原件仍保存，可手动指定实际录像 FPS 重试。`DART_FFMPEG` 可指定可执行文件路径。变帧率或丢帧时恒定帧率 MP4 不等价于逐帧精准时间同步。
 - “遥测回放”直接打开已有 Telemetry 页的姿态、目标轨迹、动态通道、曲线、时间轴与区间回放；回看不会停掉当前 UDP 接收/记录。读取板端 `mono_us` 建立相对时间轴，不依赖板端1970年的系统时间；原始 CSV、单调时间、来源和完整 UTC 复制时间均保留，不把复制时间误当飞行发生时间。
 - “删除板端整条记录”和“删除本地副本”分别确认、分别操作，不会相互删除。板端删除仅 Ground 允许，拒绝 `.part`、符号链接、子目录及越界路径。HTTP 下载服务仍是只读；新增的删除/空目录维护走 TCP daemon API，需要同步更新板端 daemon。
 - 即使断开板子，Logs 的本地副本仍可播放和回放。MP4 视频为独立播放器；本轮未实现视频与遥测游标逐帧联动。

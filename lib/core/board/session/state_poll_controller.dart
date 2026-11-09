@@ -42,6 +42,7 @@ class StatePollController extends ChangeNotifier {
   int _skippedCount = 0;
   String? _lastError;
   bool _started = false;
+  int _generation = 0;
 
   DaemonState? get state => _state;
 
@@ -58,6 +59,7 @@ class StatePollController extends ChangeNotifier {
   ConnectionController get connection => _connection;
 
   void start() {
+    _generation++;
     _started = true;
     _timer?.cancel();
     _timer = Timer(initialDelay, () => _scheduleTick(Duration.zero));
@@ -73,6 +75,7 @@ class StatePollController extends ChangeNotifier {
   }
 
   void stop() {
+    _generation++;
     _started = false;
     _timer?.cancel();
     _timer = null;
@@ -93,25 +96,30 @@ class StatePollController extends ChangeNotifier {
       return;
     }
     _inflight = true;
+    final generation = _generation;
     _connection.onPollStart();
     try {
       final state = await _repository.getState();
+      if (generation != _generation) return;
       _state = state;
       _lastError = null;
       _pollCount++;
       onPolled?.call(state);
       _connection.onPollSuccess();
     } on OperationFailedException catch (e) {
+      if (generation != _generation) return;
       // Daemon answered but rejected the op: report, keep detailed error,
       // still a "reachable" board.
       _lastError = 'operation failed: ${e.message}';
       _pollCount++;
       _connection.onPollFailure(e);
     } on ProtocolException catch (e) {
+      if (generation != _generation) return;
       _lastError = e.message;
       _pollCount++;
       _connection.onPollFailure(e);
     } catch (e, st) {
+      if (generation != _generation) return;
       _lastError = '$e';
       _pollCount++;
       _connection.onPollFailure(
@@ -119,8 +127,10 @@ class StatePollController extends ChangeNotifier {
       );
     } finally {
       _inflight = false;
-      notifyListeners();
-      _scheduleTick(Duration.zero);
+      if (generation == _generation) {
+        notifyListeners();
+        _scheduleTick(Duration.zero);
+      }
     }
   }
 }

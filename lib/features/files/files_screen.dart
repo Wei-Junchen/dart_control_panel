@@ -113,22 +113,11 @@ class _FilesScreenState extends State<FilesScreen> {
     final player = VideoController();
     final url = _controller.downloadUri(entry).toString();
     unawaited(player.open(url));
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${entry.name} · ${_humanSize(entry.size)}'),
-        content: SizedBox(
-          width: 900,
-          height: 600,
-          child: VideoPanel(controller: player, rtspAvailable: true, url: url),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
+    await showVideoPlaybackDialog(
+      context,
+      controller: player,
+      url: url,
+      title: '${entry.name} · ${_humanSize(entry.size)}',
     );
     await player.stop();
     player.dispose();

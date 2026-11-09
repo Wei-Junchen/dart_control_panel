@@ -55,6 +55,7 @@ class DaemonState {
     udpTelemetry = DaemonUdpTelemetry.fromJson(p.nested('udp_telemetry'));
     fileService = FileServiceState.fromJson(p.nested('file_service'));
     resources = Resources.fromJson(p.nested('resources'));
+    device = DeviceIdentity.fromJson(p.nested('device'));
     final workerView = p.nested('worker');
     worker = workerView == null ? null : WorkerState.fromJson(workerView);
   }
@@ -93,6 +94,7 @@ class DaemonState {
   late final DaemonUdpTelemetry udpTelemetry;
   late final FileServiceState fileService;
   late final Resources resources;
+  late final DeviceIdentity device;
   late final WorkerState? worker;
 
   /// Convenience for the UI: worker section presence without unwrapping.
@@ -108,6 +110,30 @@ class DaemonState {
     'FLIGHT_STARTING',
     'FLIGHT_STOPPING',
   }.contains(state);
+}
+
+class DeviceIdentity {
+  const DeviceIdentity(this._v);
+  factory DeviceIdentity.fromJson(JsonView? v) =>
+      v == null ? const DeviceIdentity(null) : DeviceIdentity(v);
+
+  final JsonView? _v;
+
+  String? get deviceId => _v?.strOrNull('device_id');
+  String? get sn => _v?.strOrNull('sn');
+  String? get storedSn => _v?.strOrNull('stored_sn');
+  String get status => _v?.str('status') ?? 'ERROR';
+  String? get wifiSsid => _v?.strOrNull('wifi_ssid');
+  String? get bootId => _v?.strOrNull('boot_id');
+  String? get identityError => _v?.strOrNull('identity_error');
+  bool get ready => status == 'READY';
+  String get displayName {
+    final value = sn;
+    if (value != null && value.isNotEmpty) return value;
+    final id = deviceId;
+    if (id != null && id.isNotEmpty) return id;
+    return 'unknown';
+  }
 }
 
 class FlightState {

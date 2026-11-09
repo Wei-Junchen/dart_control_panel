@@ -33,11 +33,16 @@ class VideoController extends ChangeNotifier {
   String? _lastError;
   int _reconnectCount = 0;
   bool _openInFlight = false;
+  Duration? _position;
+  Duration? _duration;
 
   VideoStatus get status => _status;
   String? get url => _url;
   String? get lastError => _lastError;
   int get reconnectCount => _reconnectCount;
+  Duration? get position => _position;
+  Duration? get duration => _duration;
+  bool get seekable => !liveStream && (_duration?.inMilliseconds ?? 0) > 0;
 
   bool get isActive => _status.isActive;
 
@@ -65,6 +70,8 @@ class VideoController extends ChangeNotifier {
     _openInFlight = true;
     _url = url;
     _lastError = null;
+    _position = null;
+    _duration = null;
     _status = VideoStatus.connecting;
     notifyListeners();
     try {
@@ -98,10 +105,22 @@ class VideoController extends ChangeNotifier {
     await _playerBackend.resume();
   }
 
+  Future<void> seek(Duration position) async {
+    if (!seekable) return;
+    final clamped = Duration(
+      milliseconds: position.inMilliseconds.clamp(0, _duration!.inMilliseconds),
+    );
+    _position = clamped;
+    notifyListeners();
+    await _playerBackend.seek(clamped);
+  }
+
   Future<void> stop() async {
     _openInFlight = false;
     await _playerBackend.close();
     _status = VideoStatus.idle;
+    _position = null;
+    _duration = null;
     notifyListeners();
   }
 
@@ -125,6 +144,9 @@ class VideoController extends ChangeNotifier {
         // stream drop: keep the URL so reconnect() still works
         _status = VideoStatus.error;
         _lastError = event.message;
+      case VideoBackendEventKind.position:
+        if (event.position != null) _position = event.position;
+        if (event.duration != null) _duration = event.duration;
     }
     notifyListeners();
   }

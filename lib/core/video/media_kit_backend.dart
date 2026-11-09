@@ -64,6 +64,12 @@ class MediaKitBackend implements VideoBackend {
           v ? VideoBackendEventKind.playing : VideoBackendEventKind.paused,
         ),
       ),
+      _player.stream.position.listen(
+        (position) => _emit(VideoBackendEventKind.position, position: position),
+      ),
+      _player.stream.duration.listen(
+        (duration) => _emit(VideoBackendEventKind.position, duration: duration),
+      ),
       _player.stream.error.listen(
         (msg) => _emit(VideoBackendEventKind.error, message: msg),
       ),
@@ -94,9 +100,21 @@ class MediaKitBackend implements VideoBackend {
   final _events = StreamController<VideoBackendEvent>.broadcast();
   bool _disposed = false;
 
-  void _emit(VideoBackendEventKind kind, {String? message}) {
+  void _emit(
+    VideoBackendEventKind kind, {
+    String? message,
+    Duration? position,
+    Duration? duration,
+  }) {
     if (_disposed) return;
-    _events.add(VideoBackendEvent(kind, message: message));
+    _events.add(
+      VideoBackendEvent(
+        kind,
+        message: message,
+        position: position,
+        duration: duration,
+      ),
+    );
   }
 
   bool get _hasNativePlayer => _player.platform is mk_native.NativePlayer;
@@ -131,6 +149,9 @@ class MediaKitBackend implements VideoBackend {
 
   @override
   Future<void> resume() => _player.play();
+
+  @override
+  Future<void> seek(Duration position) => _player.seek(position);
 
   @override
   Future<void> close() async {

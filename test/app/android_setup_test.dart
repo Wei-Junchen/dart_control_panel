@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dart_control_panel/core/preferences/connection_settings.dart';
+import 'package:dart_control_panel/core/preferences/device_registry.dart';
 import 'package:dart_control_panel/app/home_shell.dart';
 import 'package:dart_control_panel/shared/widgets/mobile_ui_scale.dart';
 import 'package:dart_control_panel/features/telemetry/telemetry_controller.dart';
@@ -71,6 +72,19 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.view.resetPhysicalSize);
       final controller = TelemetryController(source: SilentSource());
+      final temp = await tester.runAsync(
+        () => Directory.systemTemp.createTemp('device-registry-ui-'),
+      );
+      addTearDown(() => temp!.delete(recursive: true));
+      final registry = DeviceRegistry(file: File('${temp!.path}/devices.json'));
+      await tester.runAsync(
+        () => registry.remember(
+          deviceId: 'dv1_test_device',
+          sn: 'DART-TEST',
+          status: 'READY',
+          host: '10.0.0.1',
+        ),
+      );
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData(platform: TargetPlatform.android),
@@ -79,6 +93,7 @@ void main() {
             telemetryController: controller,
             enableAutoDiscovery: false,
             connectionSettingsStore: ConnectionSettingsStore.memory(),
+            deviceRegistry: registry,
           ),
         ),
       );
@@ -88,12 +103,12 @@ void main() {
       final railFinder = find.byKey(const ValueKey('mobile-navigation'));
       final paintedWidth =
           tester.getTopRight(railFinder).dx - tester.getTopLeft(railFinder).dx;
-      expect(paintedWidth, closeTo(34, .1));
+      expect(paintedWidth, closeTo(47.6, .1));
       final icons = tester.widgetList<Icon>(
         find.descendant(of: railFinder, matching: find.byType(Icon)),
       );
       expect(icons.length, 5);
-      expect(icons.every((icon) => icon.size == 22), isTrue);
+      expect(icons.every((icon) => icon.size == 24), isTrue);
       final sidebar = find.byKey(const ValueKey('telemetry-channel-sidebar'));
       expect(sidebar, findsOneWidget);
       expect(
@@ -133,7 +148,12 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('关闭'));
       await tester.pumpAndSettle();
-      for (final destination in ['Ground Test', 'Mode', 'Telemetry']) {
+      for (final destination in [
+        'Ground Test',
+        'Mode',
+        'Devices',
+        'Telemetry',
+      ]) {
         await tester.tap(find.byTooltip(destination));
         await tester.pumpAndSettle();
         final header = tester.widget<AppBar>(find.byType(AppBar));
@@ -141,14 +161,16 @@ void main() {
         expect(
           header.toolbarHeight ??
               Theme.of(headerContext).appBarTheme.toolbarHeight,
-          28,
+          40,
         );
         expect(tester.takeException(), isNull);
       }
-      await tester.tap(find.byTooltip('Logs'));
+      await tester.tap(find.byTooltip('Devices'));
       await tester.pumpAndSettle();
-      expect(find.text('飞行日志'), findsOneWidget);
-      expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 28);
+      await tester.tap(find.textContaining('DART-TEST'));
+      await tester.pumpAndSettle();
+      expect(find.text('飞行日志 · DART-TEST'), findsOneWidget);
+      expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 40);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('本地副本 / 回放'));
       await tester.pumpAndSettle();

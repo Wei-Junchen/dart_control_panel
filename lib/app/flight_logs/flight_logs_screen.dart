@@ -8,6 +8,7 @@ import 'package:dart_control_panel/features/files/board_file_api.dart';
 import 'package:dart_control_panel/features/telemetry/telemetry_archive.dart';
 import 'package:dart_control_panel/core/video/video_controller.dart';
 import 'package:dart_control_panel/core/video/video_panel.dart';
+import 'package:dart_control_panel/features/flight_analysis/luma_analysis_screen.dart';
 import 'flight_log_controller.dart';
 
 class FlightLogsScreen extends StatefulWidget {
@@ -16,16 +17,26 @@ class FlightLogsScreen extends StatefulWidget {
     required this.controller,
     required this.onReplay,
     this.filePort = 9002,
+    this.deviceIdFilter,
+    this.deviceLabel,
+    this.initialTab = 0,
+    this.unknownOnly = false,
   });
   final FlightLogController controller;
   final Future<void> Function(TelemetryArchive) onReplay;
   final int filePort;
+  final String? deviceIdFilter;
+  final String? deviceLabel;
+  final int initialTab;
+  final bool unknownOnly;
   @override
   State<FlightLogsScreen> createState() => _FlightLogsScreenState();
 }
 
 class _FlightLogsScreenState extends State<FlightLogsScreen> {
   FlightLogController get c => widget.controller;
+  String? get deviceIdFilter => widget.deviceIdFilter;
+  String? get deviceLabel => widget.deviceLabel;
   bool get compact => MediaQuery.sizeOf(context).height < 500;
   Future<bool> confirm(String title, String message) async =>
       await showDialog<bool>(
@@ -47,12 +58,19 @@ class _FlightLogsScreenState extends State<FlightLogsScreen> {
       ) ??
       false;
   Future<void> copy(RemoteEntry entry) async {
-    final path = await chooseLogDirectory(
-      context,
-      initialDirectory: c.localRoot.existsSync() ? c.localRoot.path : null,
-      confirmButtonText: '复制到此目录',
-    );
-    if (path != null) await c.copyRemote(entry, Directory(path));
+    try {
+      await c.copyRemote(entry, c.localRoot);
+    } catch (e) {
+      showError(e);
+    }
+  }
+
+  Future<void> useDefaultRoot() async {
+    try {
+      await c.setLocalRoot(FlightLogController.defaultLocalRoot());
+    } catch (e) {
+      showError(e);
+    }
   }
 
   Future<void> chooseLocal() async {
@@ -83,7 +101,7 @@ class _FlightLogsScreenState extends State<FlightLogsScreen> {
     }
   }
 
-  Future<void> remux(LocalFlightLog log) async {
+  Future<double?> askFps(LocalFlightLog log) async {
     final field = TextEditingController(
       text: ((log.metadata['estimated_video_fps'] as num?)?.toDouble() ?? 80)
           .toStringAsFixed(3),
@@ -124,66 +142,48 @@ class _FlightLogsScreenState extends State<FlightLogsScreen> {
     );
     // Dialog route may still be animating; controller disposal is delayed.
     Future<void>.delayed(const Duration(seconds: 1), field.dispose);
-    if (fps != null) {
-      await c.remuxLocal(log, fps);
-      if (c.error != null) showError(c.error!);
-    }
+    return fps;
   }
 
-  Future<void> play(LocalFlightLog log) async {
-    if (log.mp4 == null && log.file('.h264') != null) {
-      // Supply explicit timestamps before playback: raw Annex-B has no
-      // reliable duration/seek index. Cache a lossless MP4, retain the original.
-      await remux(log);
-      if (!mounted || log.mp4 == null) return;
+  Future<void> remux(LocalFlightLog log) async {
+    final fps = await askFps(log);
+    if (fps == null) return;
+    await c.remuxLocal(log, fps);
+    if (c.error != null) showError(c.error!);
+  }
+
+  Future<void> play(LocalFlightLog log) => _playVideo(log, raw: false);
+
+  Future<void> _playVideo(LocalFlightLog log, {required bool raw}) async {
+    var file = raw ? log.rawMp4 : log.overlayMp4;
+    final source = raw ? log.rawH264 : log.overlayH264;
+    if (file == null && source != null) {
+      final fps = await askFps(log);
+      if (fps == null) return;
+      await c.remuxLocal(log, fps);
+      if (c.error != null) {
+        showError(c.error!);
+        return;
+      }
+      file = raw ? log.rawMp4 : log.overlayMp4;
     }
-    final file = log.mp4 ?? log.file('.h264');
-    if (file == null) return;
+    if (file == null) {
+      showError(raw ? '没有原始录像' : '没有叠加录像');
+      return;
+    }
+    await _openVideo(log, file);
+  }
+
+  Future<void> _openVideo(LocalFlightLog log, File file) async {
     final player = VideoController();
     try {
       await player.open(file.uri.toString());
       if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => MobileUiScale.isHandset(context)
-            ? Dialog.fullscreen(
-                child: Scaffold(
-                  appBar: AppBar(
-                    title: Text(log.name),
-                    automaticallyImplyLeading: false,
-                    actions: [
-                      IconButton(
-                        tooltip: '关闭录像',
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  body: VideoPanel(
-                    controller: player,
-                    rtspAvailable: true,
-                    url: file.uri.toString(),
-                  ),
-                ),
-              )
-            : AlertDialog(
-                title: Text(log.name),
-                content: SizedBox(
-                  width: 900,
-                  height: 560,
-                  child: VideoPanel(
-                    controller: player,
-                    rtspAvailable: true,
-                    url: file.uri.toString(),
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('关闭'),
-                  ),
-                ],
-              ),
+      await showVideoPlaybackDialog(
+        context,
+        controller: player,
+        url: file.uri.toString(),
+        title: log.name,
       );
     } catch (e) {
       showError(e);
@@ -198,14 +198,15 @@ class _FlightLogsScreenState extends State<FlightLogsScreen> {
     listenable: c,
     builder: (context, _) => DefaultTabController(
       length: 3,
+      initialIndex: widget.initialTab,
       child: Scaffold(
         appBar: AppBar(
           toolbarHeight: MobileUiScale.isHandset(context)
-              ? 28
+              ? 40
               : compact
               ? 40
               : kToolbarHeight,
-          title: const Text('飞行日志'),
+          title: Text(deviceLabel == null ? '飞行日志' : '飞行日志 · $deviceLabel'),
           bottom: TabBar(
             tabs: [
               Tab(
@@ -287,6 +288,15 @@ class _FlightLogsScreenState extends State<FlightLogsScreen> {
         ),
       );
     }
+    if ((widget.unknownOnly && (c.deviceId?.trim().isNotEmpty ?? false)) ||
+        (deviceIdFilter != null && c.deviceId != deviceIdFilter)) {
+      return Center(
+        child: Text(
+          '当前连接的不是该设备，无法浏览其板端记录。\n请回到设备页连接对应板子。',
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
     if (c.remote.isEmpty) return const Center(child: Text('暂无板端飞行记录'));
     return ListView(
       children: [
@@ -329,106 +339,171 @@ class _FlightLogsScreenState extends State<FlightLogsScreen> {
     );
   }
 
-  Widget local() => Column(
-    children: [
-      Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: compact ? 4 : 12,
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: SelectableText(
-                '本地目录：${c.localRoot.path}',
-                maxLines: compact ? 2 : null,
+  Widget local() {
+    final logs = widget.unknownOnly
+        ? c.local.where((log) => log.deviceId == null).toList()
+        : deviceIdFilter == null
+        ? c.local
+        : c.local.where((log) => log.deviceId == deviceIdFilter).toList();
+    return Column(
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: compact ? 4 : 12,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: SelectableText(
+                  '本地目录：${c.localRoot.path}'
+                  '${c.legacyRoot.path != c.localRoot.path && c.legacyRoot.existsSync() ? '\n旧版目录：${c.legacyRoot.path}' : ''}',
+                  maxLines: compact ? 2 : null,
+                ),
               ),
-            ),
-            TextButton.icon(
-              style: compact
-                  ? TextButton.styleFrom(
-                      minimumSize: const Size(0, 32),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    )
-                  : null,
-              onPressed: c.busy ? null : chooseLocal,
-              icon: const Icon(Icons.folder_open),
-              label: const Text('选择目录'),
-            ),
-          ],
+              TextButton.icon(
+                style: compact
+                    ? TextButton.styleFrom(
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      )
+                    : null,
+                onPressed: c.busy ? null : useDefaultRoot,
+                icon: const Icon(Icons.restore),
+                label: const Text('默认目录'),
+              ),
+              TextButton.icon(
+                style: compact
+                    ? TextButton.styleFrom(
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      )
+                    : null,
+                onPressed: c.busy ? null : chooseLocal,
+                icon: const Icon(Icons.folder_open),
+                label: const Text('选择目录'),
+              ),
+            ],
+          ),
         ),
-      ),
-      Expanded(
-        child: c.local.isEmpty
-            ? const Center(child: Text('尚无本地飞行记录，请从板端复制或选择已有的本地日志目录'))
-            : ListView(
-                children: [
-                  for (final log in c.local)
-                    ListTile(
-                      leading: Icon(
-                        log.metadata['complete'] == true
-                            ? Icons.flight
-                            : Icons.warning_amber,
-                      ),
-                      title: Text(
-                        '${log.name} · ${log.metadata['source_host'] ?? ''}',
-                      ),
-                      subtitle: Text(
-                        '复制时间：${log.metadata['copied_at'] ?? '未知'}（非飞行发生时间）\n${log.directory.path}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      isThreeLine: true,
-                      trailing: Wrap(
-                        children: [
-                          if (log.replayable)
-                            TextButton.icon(
-                              onPressed: c.busy ? null : () => replay(log),
-                              icon: const Icon(Icons.show_chart),
-                              label: const Text('遥测回放'),
-                            ),
-                          if (log.file('.h264') != null && log.mp4 == null)
-                            TextButton(
-                              onPressed: c.busy ? null : () => remux(log),
-                              child: const Text('封装 MP4'),
-                            ),
-                          if (log.mp4 != null || log.file('.h264') != null)
+        Expanded(
+          child: logs.isEmpty
+              ? Center(
+                  child: Text(
+                    deviceIdFilter == null
+                        ? '尚无本地飞行记录，请从板端复制或选择已有的本地日志目录'
+                        : '该设备尚无本地飞行记录',
+                  ),
+                )
+              : ListView(
+                  children: [
+                    for (final log in logs)
+                      ListTile(
+                        leading: Icon(
+                          log.metadata['complete'] == true
+                              ? Icons.flight
+                              : Icons.warning_amber,
+                        ),
+                        title: Text(
+                          '${log.name} · ${log.metadata['source_host'] ?? ''}',
+                        ),
+                        subtitle: Text(
+                          '设备：${log.sn ?? log.deviceId ?? '未关联（旧记录）'}\n复制时间：${log.metadata['copied_at'] ?? '未知'}（非飞行发生时间）\n${log.directory.path}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        isThreeLine: true,
+                        trailing: Wrap(
+                          children: [
+                            if (log.replayable)
+                              TextButton.icon(
+                                onPressed: c.busy ? null : () => replay(log),
+                                icon: const Icon(Icons.show_chart),
+                                label: const Text('遥测回放'),
+                              ),
+                            if (log.hasOverlay)
+                              TextButton.icon(
+                                onPressed: c.busy
+                                    ? null
+                                    : () => _playVideo(log, raw: false),
+                                icon: const Icon(
+                                  Icons.play_circle_outline,
+                                  size: 18,
+                                ),
+                                label: const Text('叠加录像'),
+                              ),
+                            if (log.hasRaw)
+                              TextButton.icon(
+                                onPressed: c.busy
+                                    ? null
+                                    : () => _playVideo(log, raw: true),
+                                icon: const Icon(
+                                  Icons.videocam_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('原始录像'),
+                              ),
+                            if ((Platform.isLinux || Platform.isAndroid) &&
+                                (log.rawH264 != null ||
+                                    log.overlayH264 != null))
+                              TextButton.icon(
+                                key: const ValueKey('analyze-h264'),
+                                onPressed: c.busy
+                                    ? null
+                                    : () => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => LumaAnalysisScreen(
+                                            video:
+                                                log.rawH264 ?? log.overlayH264!,
+                                            snapshot: log.snapshot,
+                                          ),
+                                        ),
+                                      ),
+                                icon: const Icon(
+                                  Icons.analytics_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('离线分析'),
+                              ),
+                            if (log.needsRemux)
+                              TextButton(
+                                onPressed: c.busy ? null : () => remux(log),
+                                child: const Text('封装 MP4'),
+                              ),
+                            if (Platform.isAndroid)
+                              IconButton(
+                                tooltip: '压缩并分享单次日志',
+                                onPressed: c.busy
+                                    ? null
+                                    : () async {
+                                        await c.shareLocal(log);
+                                        if (c.error != null) {
+                                          showError(c.error!);
+                                        }
+                                      },
+                                icon: const Icon(Icons.share_outlined),
+                              ),
                             IconButton(
-                              tooltip: '播放录像',
-                              onPressed: c.busy ? null : () => play(log),
-                              icon: const Icon(Icons.play_circle_outline),
-                            ),
-                          if (Platform.isAndroid)
-                            IconButton(
-                              tooltip: '压缩并分享单次日志',
+                              tooltip: '删除本地副本',
                               onPressed: c.busy
                                   ? null
                                   : () async {
-                                      await c.shareLocal(log);
-                                      if (c.error != null) showError(c.error!);
+                                      if (await confirm(
+                                        '删除本地 ${log.name}？',
+                                        '仅删除这份本地副本，板端原文件不受影响。',
+                                      )) {
+                                        await c.deleteLocal(log);
+                                      }
                                     },
-                              icon: const Icon(Icons.share_outlined),
+                              icon: const Icon(Icons.delete_outline),
                             ),
-                          IconButton(
-                            tooltip: '删除本地副本',
-                            onPressed: c.busy
-                                ? null
-                                : () async {
-                                    if (await confirm(
-                                      '删除本地 ${log.name}？',
-                                      '仅删除这份本地副本，板端原文件不受影响。',
-                                    )) {
-                                      await c.deleteLocal(log);
-                                    }
-                                  },
-                            icon: const Icon(Icons.delete_outline),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                ],
-              ),
-      ),
-    ],
-  );
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
 }

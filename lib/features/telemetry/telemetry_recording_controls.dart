@@ -132,16 +132,24 @@ class _TelemetryRecordingControlsState
     final root = c.recorder?.directory ?? TelemetryRecorder.defaultDirectory();
     await root.create(recursive: true);
     final dirs = <Directory>[];
-    await for (final entry in root.list()) {
-      if (entry is Directory &&
-          !entry.uri.pathSegments
-              .where((s) => s.isNotEmpty)
-              .last
-              .startsWith('connection_') &&
-          await File('${entry.path}/metadata.json').exists()) {
-        dirs.add(entry);
+    Future<void> collect(Directory parent, int depth) async {
+      await for (final entry in parent.list()) {
+        if (entry is! Directory ||
+            entry.uri.pathSegments
+                .where((s) => s.isNotEmpty)
+                .last
+                .startsWith('connection_')) {
+          continue;
+        }
+        if (await File('${entry.path}/metadata.json').exists()) {
+          dirs.add(entry);
+        } else if (depth < 2) {
+          await collect(entry, depth + 1);
+        }
       }
     }
+
+    await collect(root, 0);
     dirs.sort((a, b) => b.path.compareTo(a.path));
     if (!mounted) return;
     final selected = await showDialog<Directory>(

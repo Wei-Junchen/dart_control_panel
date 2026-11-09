@@ -48,7 +48,7 @@ class MobileUiScale extends StatelessWidget {
                 child: Theme(
                   data: Theme.of(context).copyWith(
                     appBarTheme: Theme.of(context).appBarTheme.copyWith(
-                      toolbarHeight: 28,
+                      toolbarHeight: 40,
                       titleSpacing: 8,
                       titleTextStyle: Theme.of(context).textTheme.titleSmall
                           ?.copyWith(

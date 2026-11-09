@@ -16,6 +16,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.net.Inet4Address
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : FlutterActivity() {
@@ -25,6 +26,10 @@ class MainActivity : FlutterActivity() {
     private var preferWifi = false
     private val videoJobs = Executors.newSingleThreadExecutor()
     private val converting = AtomicBoolean(false)
+    private val analysisJobs = Executors.newSingleThreadExecutor()
+    private val analyzing = AtomicBoolean(false)
+    private val frameCaches = ConcurrentHashMap<String, AnalysisFrameCache>()
+    private val cancelAnalysis = AtomicBoolean(false)
     private val shareJobs = Executors.newSingleThreadExecutor()
     private val sharing = AtomicBoolean(false)
 
@@ -74,6 +79,10 @@ class MainActivity : FlutterActivity() {
             }
         }
         connectivity.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), callback!!)
+        // Remove abandoned temporary caches from a previous process. Never scan user files.
+        cacheDir.listFiles()?.filter { it.name.startsWith("analysis-frames-") && it.name.endsWith(".cache") }
+            ?.forEach { it.delete() }
+        val analysisFrames = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.litwei.dart_control_panel/analysis_frames")
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.litwei.dart_control_panel/platform").setMethodCallHandler { call, result ->
             when (call.method) {
                 "paths" -> result.success(mapOf("config" to filesDir.absolutePath,
@@ -134,6 +143,109 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
+                "cancelH264Analysis" -> {
+                    cancelAnalysis.set(true)
+                    result.success(null)
+                }
+                "readAnalysisFrame" -> {
+                    val id = call.argument<String>("analysis_id")
+                    val frame = call.argument<Int>("frame")
+                    val values = call.argument<List<Number>>("thresholds")
+                    val mode = call.argument<String>("mode") ?: "nv21_green"
+                    val lumaInts = call.argument<List<Number>>("luma_ints")
+                    val lumaFloats = call.argument<List<Number>>("luma_floats")
+                    val common = call.argument<List<Number>>("detector_common")
+                    if (id == null || frame == null || values?.size != 5 || lumaInts?.size != 2 || lumaFloats?.size != 4 || common?.size != 9 || mode !in listOf("nv21_green", "luma_ellipse")) {
+                        result.error("ARGUMENT", "缺少缓存帧或检测器参数", null)
+                    } else analysisJobs.execute {
+                        try {
+                            val cached = frameCaches[id] ?: error("帧缓存已失效，请重新准备视频")
+                            val rawFrame = cached.read(frame)
+                            val native = NativeGreenDetector()
+                            val handle = native.create(values.map { it.toInt() }.toIntArray(), mode,
+                                lumaInts.map { it.toInt() }.toIntArray(), lumaFloats.map { it.toDouble() }.toDoubleArray(),
+                                common.map { it.toInt() }.toIntArray())
+                            check(handle != 0L) { "无法创建检测器" }
+                            val data = try {
+                                val detection = native.detect(handle, rawFrame.nv21, rawFrame.width, rawFrame.height)
+                                GreenFramePreview.build(native, handle, rawFrame.nv21, rawFrame.width, rawFrame.height, detection, frame)
+                            } finally { native.destroy(handle) }
+                            runOnUiThread { result.success(data) }
+                        } catch (e: Exception) { runOnUiThread { result.error("CACHE", e.message, null) } }
+                    }
+                }
+                "releaseAnalysisCache" -> {
+                    val id = call.argument<String>("analysis_id")
+                    if (id != null) analysisJobs.execute { frameCaches.remove(id)?.close() }
+                    result.success(null)
+                }
+                "analyzeH264" -> {
+                    val path = call.argument<String>("path")
+                    val values = call.argument<List<Number>>("thresholds")
+                    val mode = call.argument<String>("mode") ?: "nv21_green"
+                    val lumaInts = call.argument<List<Number>>("luma_ints") ?: listOf(80, 9)
+                    val lumaFloats = call.argument<List<Number>>("luma_floats") ?: listOf(2.0, 0.9, 0.25, 1.5)
+                    val common = call.argument<List<Number>>("detector_common") ?: listOf(20, 1, 1, 1, 1, 0, 0, 0, 0)
+                    val targetFrame = call.argument<Int>("target_frame")
+                    val analysisId = call.argument<String>("analysis_id")
+                    val cacheAll = call.argument<Boolean>("cache_all") == true && targetFrame == null && analysisId != null
+                    val preview = call.argument<Boolean>("preview") == true && analysisId != null
+                    val pacePreview = call.argument<Boolean>("pace_preview") == true && preview
+                    if (path == null || values == null || values.size != 5 || mode !in listOf("nv21_green", "luma_ellipse") || lumaInts.size != 2 || lumaFloats.size != 4 || common.size != 9) {
+                        result.error("ARGUMENT", "需要 H.264 路径和五个阈值", null)
+                    } else if (!analyzing.compareAndSet(false, true)) {
+                        result.error("BUSY", "已有录像正在分析", null)
+                    } else {
+                        cancelAnalysis.set(false)
+                        analysisJobs.execute {
+                            var frameCache: AnalysisFrameCache? = null
+                            try {
+                                val raw = File(path).canonicalFile
+                                val roots = listOfNotNull(filesDir, getExternalFilesDir(null))
+                                require(roots.any { raw.path.startsWith(it.canonicalPath + File.separator) }) {
+                                    "仅允许分析应用日志目录内的文件"
+                                }
+                                val previewQueued = AtomicBoolean(false)
+                                val onFrame: ((NativeGreenDetector, Long, ByteArray, Int, Int, LongArray, Int) -> Unit)? = if (!preview) null else { native, handle, frame, width, height, detection, number ->
+                                    if (previewQueued.compareAndSet(false, true)) {
+                                        try {
+                                            val snapshot = GreenFramePreview.build(native, handle, frame, width, height, detection, number) + ("analysis_id" to analysisId!!)
+                                            runOnUiThread {
+                                                try { analysisFrames.invokeMethod("frame", snapshot) }
+                                                finally { previewQueued.set(false) }
+                                            }
+                                        } catch (e: Throwable) {
+                                            previewQueued.set(false)
+                                            throw e
+                                        }
+                                    }
+                                }
+                                if (cacheAll) frameCache = AnalysisFrameCache(File.createTempFile("analysis-frames-", ".cache", cacheDir))
+                                var nextProgressAt = 0L
+                                val cacheFrame: ((ByteArray, Int, Int, Int) -> Unit)? =
+                                    if (!cacheAll) null else { frame, width, height, number ->
+                                        frameCache!!.add(number, width, height, frame)
+                                        if (System.nanoTime() >= nextProgressAt) {
+                                            nextProgressAt = System.nanoTime() + 250_000_000L
+                                            runOnUiThread { analysisFrames.invokeMethod("progress", mapOf("analysis_id" to analysisId!!, "frame" to number)) }
+                                        }
+                                    }
+                                val data = H264GreenAnalysis.analyze(raw, cacheDir,
+                                    values.map { it.toInt() }.toIntArray(), mode, lumaInts.map { it.toInt() }.toIntArray(),
+                                    lumaFloats.map { it.toDouble() }.toDoubleArray(), common.map { it.toInt() }.toIntArray(), cancelAnalysis,
+                                    if (cacheAll) null else onFrame, if (cacheAll) false else pacePreview, targetFrame, cacheFrame)
+                                check(!cancelAnalysis.get() && !isDestroyed) { "分析已取消" }
+                                if (frameCache != null) {
+                                    frameCaches.put(analysisId!!, frameCache)?.close()
+                                    frameCache = null
+                                }
+                                runOnUiThread { result.success(data) }
+                            } catch (e: Throwable) {
+                                runOnUiThread { result.error("ANALYSIS", e.message ?: "录像分析失败", null) }
+                            } finally { frameCache?.close(); analyzing.set(false) }
+                        }
+                    }
+                }
                 "remuxH264" -> {
                     val path = call.argument<String>("path")
                     val fps = call.argument<Number>("fps")?.toDouble()
@@ -160,6 +272,10 @@ class MainActivity : FlutterActivity() {
         }
     }
     override fun onDestroy() {
+        cancelAnalysis.set(true)
+        analysisJobs.shutdownNow()
+        frameCaches.values.forEach { it.close() }
+        frameCaches.clear()
         shareJobs.shutdownNow()
         videoJobs.shutdownNow()
         callback?.let { connectivity.unregisterNetworkCallback(it) }

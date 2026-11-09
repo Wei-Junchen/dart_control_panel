@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:dart_control_panel/core/board/session/connection_controller.dart';
 import 'package:dart_control_panel/core/board/session/mutation_queue.dart';
 import 'package:dart_control_panel/core/preferences/board_address_store.dart';
+import 'package:dart_control_panel/core/preferences/device_registry.dart';
 import 'package:dart_control_panel/core/board/models/daemon_state.dart';
 import 'package:dart_control_panel/core/board/api/daemon_client.dart';
 import 'package:dart_control_panel/core/board/api/protocol_exception.dart';
@@ -56,8 +57,20 @@ class BoardSession extends ChangeNotifier {
       _connection = ConnectionController();
       _connection!.onPollSuccess();
       _state = probe;
-      // remember the endpoint for the next session (no credentials involved)
+      // remember the endpoint and device identity for the next session
       unawaited(BoardAddressStore.instance.remember(host, port));
+      final device = probe.device;
+      if (device.deviceId != null && device.deviceId!.isNotEmpty) {
+        unawaited(
+          DeviceRegistry.instance.remember(
+            deviceId: device.deviceId!,
+            sn: device.sn,
+            status: device.status,
+            host: host,
+            port: port,
+          ),
+        );
+      }
       setStatus('Connected');
     } catch (_) {
       await repo.close();
