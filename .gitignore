@@ -33,6 +33,11 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Generated packages, platform builds and local flight archives
+/dist/
+/android/build/
+/dv1_*/
+
 # Symbolication related
 app.*.symbols
 

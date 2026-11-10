@@ -97,7 +97,9 @@
           "threshold": 180,
           "blob": 280,
           "fine_samples": 3000,
-          "fine_passes": 200
+          "fine_passes": 200,
+          "coarse_samples": 11200,
+          "coarse_passes": 1
         }
       },
       "camera": {

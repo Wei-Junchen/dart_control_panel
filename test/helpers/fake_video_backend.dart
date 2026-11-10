@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'package:dart_control_panel/video/video_backend.dart';
+import 'package:dart_control_panel/core/video/video_backend.dart';
 
 /// Scriptable [VideoBackend] for tests — no decoder involved. Emit events
 /// with [emit] / [emitError]; hooks record calls.
@@ -13,7 +13,9 @@ class FakeVideoBackend implements VideoBackend {
   int resumeCalls = 0;
   int closeCalls = 0;
   int disposeCalls = 0;
+  int seekCalls = 0;
   String? lastUrl;
+  Duration? lastSeek;
   Object? openError;
   Widget? surface;
 
@@ -32,6 +34,12 @@ class FakeVideoBackend implements VideoBackend {
 
   @override
   Future<void> resume() async => resumeCalls++;
+
+  @override
+  Future<void> seek(Duration position) async {
+    seekCalls++;
+    lastSeek = position;
+  }
 
   @override
   Future<void> close() async => closeCalls++;
@@ -55,4 +63,10 @@ class FakeVideoBackend implements VideoBackend {
   void emitStopped() => emit(VideoBackendEventKind.stopped);
   void emitError(String message) =>
       emit(VideoBackendEventKind.error, message: message);
+  void emitPosition(Duration position) => _events.add(
+    VideoBackendEvent(VideoBackendEventKind.position, position: position),
+  );
+  void emitDuration(Duration duration) => _events.add(
+    VideoBackendEvent(VideoBackendEventKind.position, duration: duration),
+  );
 }

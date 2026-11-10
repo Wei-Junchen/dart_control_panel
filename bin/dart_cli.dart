@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:dart_control_panel/models/daemon_state.dart';
-import 'package:dart_control_panel/protocol/daemon_client.dart';
-import 'package:dart_control_panel/protocol/protocol_exception.dart';
-import 'package:dart_control_panel/repositories/board_repository.dart';
+import 'package:dart_control_panel/core/board/models/daemon_state.dart';
+import 'package:dart_control_panel/core/board/api/daemon_client.dart';
+import 'package:dart_control_panel/core/board/api/protocol_exception.dart';
+import 'package:dart_control_panel/core/board/api/board_repository.dart';
 
 /// P0 acceptance: a pure-Dart CLI that can talk to the daemon without any
 /// Flutter UI.
